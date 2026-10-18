@@ -34,8 +34,12 @@ if ($DryRun) {
     $exists = $false
 }
 else {
-    & gh repo view $Repo *> $null
+    # gh prints an error for a missing repository; Windows PowerShell 5.1 would turn that into an exception under "Stop"
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & gh repo view $Repo 2>&1 | Out-Null
     $exists = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $previous
 }
 
 if ($exists) {
