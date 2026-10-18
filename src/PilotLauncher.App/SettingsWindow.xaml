@@ -1,0 +1,35 @@
+<Window x:Class="PilotLauncher.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройки" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <StackPanel Margin="24,20,24,20">
+        <TextBlock Text="Папка для версий Pilot" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.75"
+                   Text="Версии занимают сотни мегабайт каждая. Папка должна быть на локальном диске. Уже скачанные версии остаются на старом месте и в списке не появятся, пока вы не вернёте старую папку." />
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="PathBox" VerticalContentAlignment="Center" Height="32" />
+            <Button Grid.Column="1" Content="Выбрать..." Margin="8,0,0,0" Height="32" Click="Browse_Click" />
+        </Grid>
+        <TextBlock Text="Папка с установщиками" FontSize="16" FontWeight="SemiBold" Margin="0,20,0,0" />
+        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.75"
+                   Text="Необязательно. Файлы Pilot-...-setup_версия.zip и .exe из этой папки при старте добавляются в список версий: их можно запустить без интернета. Папка может быть на флешке или в сети, файлы только читаются и не удаляются." />
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="SetupBox" VerticalContentAlignment="Center" Height="32" />
+            <Button Grid.Column="1" Content="Выбрать..." Margin="8,0,0,0" Height="32" Click="BrowseSetup_Click" />
+        </Grid>
+        <TextBlock x:Name="ErrorText" Foreground="#E53935" Margin="0,8,0,0" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="Сохранить" MinWidth="100" Margin="0,0,8,0" IsDefault="True" Click="Save_Click" />
+            <Button Content="Отмена" MinWidth="100" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

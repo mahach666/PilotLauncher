@@ -1,0 +1,48 @@
+name: release
+
+# A tag like v1.2.3 builds the installer and the portable zip and publishes them as a GitHub release.
+# The release text is the matching section of CHANGELOG.md; the run fails when that section is missing.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Test
+        run: dotnet test PilotLauncher.sln -c Release
+
+      - name: Version and release notes
+        shell: pwsh
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          ./build/release-notes.ps1 -Version $version -Out release-notes.md
+
+      - name: Publish
+        shell: pwsh
+        run: ./build/publish.ps1 -Version $env:VERSION
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create $env:TAG `
+            artifacts/PilotLauncher-Setup.exe `
+            artifacts/PilotLauncher-portable-win-x64.zip `
+            artifacts/SHA256SUMS.txt `
+            --title "Pilot Launcher $env:VERSION" `
+            --notes-file release-notes.md

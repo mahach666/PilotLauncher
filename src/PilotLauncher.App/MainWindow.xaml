@@ -1,0 +1,286 @@
+<Window x:Class="PilotLauncher.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Pilot Launcher" Width="860" Height="540" MinWidth="700" MinHeight="470"
+        WindowStartupLocation="CenterScreen" Icon="Assets/launcher.ico"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
+    <Window.Resources>
+        <ContextMenu x:Key="FileMenu" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14">
+            <MenuItem Header="Добавить из файла..." Command="{Binding AddFromFileCommand}" />
+            <MenuItem Header="Скачать для офлайна..." Command="{Binding DownloadForOfflineCommand}" />
+        </ContextMenu>
+        <ContextMenu x:Key="ActionsMenu" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14">
+            <MenuItem Header="Запустить в отдельном профиле" Command="{Binding LaunchIsolatedCommand}" />
+            <MenuItem Header="Поставить для отдельного пользователя" Command="{Binding CopyToSeparateUserCommand}" />
+            <MenuItem Header="Установить в систему (заменить текущую)..." Command="{Binding InstallToSystemCommand}" />
+            <Separator />
+            <MenuItem Header="Открыть папку" Command="{Binding OpenFolderCommand}" />
+            <MenuItem Header="Создать ярлык на рабочем столе" Command="{Binding CreateShortcutCommand}" />
+            <Separator />
+            <MenuItem Header="Удалить..." Command="{Binding DeleteCommand}" />
+        </ContextMenu>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="24,14,16,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Pilot Launcher" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding RunningText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,16,0" />
+            <!-- the icon font is set on the glyph only: a button's font is inherited by a context menu opened from it -->
+            <Button Grid.Column="2" ToolTip="Файлы установщиков: добавить из файла, скачать для офлайна (можно и перетащить файл на окно)"
+                    Click="FileMenu_Click" Height="34" Padding="12,0" Margin="0,0,6,0" AutomationProperties.Name="Файл">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE8E5;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center" />
+                    <TextBlock Text="Файл" Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="3" ToolTip="Обновить список версий" Command="{Binding RefreshCommand}"
+                    Width="40" Height="34" Padding="0" Margin="0,0,6,0">
+                <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" />
+            </Button>
+            <Button Grid.Column="4" ToolTip="Настройки" Click="Settings_Click" Width="40" Height="34" Padding="0">
+                <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" />
+            </Button>
+        </Grid>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="32,20,32,16">
+                <Border Visibility="{Binding HasNotice, Converter={StaticResource BoolToVisibility}}"
+                        Background="#33FFB300" CornerRadius="6" Padding="12,8" Margin="0,0,0,16">
+                    <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" />
+                </Border>
+
+                <TextBlock Text="{Binding Title}" FontSize="30" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding StateText}" Margin="0,8,0,0" TextWrapping="Wrap" FontSize="14" />
+
+                <Border Visibility="{Binding ShowUpdateWarning, Converter={StaticResource BoolToVisibility}}"
+                        Background="#1FFFB300" CornerRadius="6" Padding="12,8" Margin="0,14,0,0">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Если Pilot предложит обновиться, откажитесь: обновление ставится службой PilotUpdater в систему и может заменить установленную там версию." />
+                </Border>
+
+                <StackPanel Margin="0,18,0,0">
+                    <TextBlock Text="{Binding ReleasedText}" Opacity="0.75" />
+                    <TextBlock Text="{Binding SizeText}" Opacity="0.75" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding FolderText}" Opacity="0.75" Margin="0,4,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Margin="0,24,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="{Binding Status}" Margin="0,0,0,6" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressBar Minimum="0" Maximum="100" Height="8" Value="{Binding Progress, Mode=OneWay}"
+                                     IsIndeterminate="{Binding ProgressIndeterminate}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Отмена" Command="{Binding CancelCommand}" Margin="12,0,0,0" />
+                    </Grid>
+                </StackPanel>
+
+                <TextBlock Margin="0,24,0,0" Text="{Binding Status}" Opacity="0.8">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <Border Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}"
+                        Background="#33E53935" CornerRadius="6" Padding="12,8" Margin="0,16,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+                        <Button Grid.Column="1" Content="Закрыть" Command="{Binding DismissErrorCommand}" Margin="12,0,0,0" VerticalAlignment="Top" />
+                    </Grid>
+                </Border>
+
+                <Expander Header="{Binding Extensions.Header}" Margin="0,16,0,0"
+                          Visibility="{Binding Extensions.IsVisible, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Margin="0,8,0,0">
+                        <ItemsControl ItemsSource="{Binding Extensions.Rows}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding StateText}" Opacity="0.85" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Description}" Opacity="0.6" FontSize="12" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="{Binding InstallText}" Command="{Binding InstallCommand}" MinWidth="110"
+                                                Margin="12,0,0,0" VerticalAlignment="Top"
+                                                Visibility="{Binding CanInstall, Converter={StaticResource BoolToVisibility}}" />
+                                        <Button Grid.Column="2" Content="Удалить" Command="{Binding RemoveCommand}" MinWidth="90"
+                                                Margin="8,0,0,0" VerticalAlignment="Top"
+                                                Visibility="{Binding CanRemove, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Content="Обновить все" Command="{Binding Extensions.UpdateAllCommand}" HorizontalAlignment="Left" MinWidth="110"
+                                Visibility="{Binding Extensions.HasUpdates, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Text="{Binding Extensions.Note}" TextWrapping="Wrap" Opacity="0.65" FontSize="12" Margin="0,8,0,0"
+                                   Visibility="{Binding Extensions.HasNote, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+                </Expander>
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Что нового" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Margin="0,0,16,0" Visibility="{Binding IsRussianRootTrusted, Converter={StaticResource BoolToVisibility}}">
+                            <Hyperlink Command="{Binding StopTrustingRussianRootCommand}"
+                                       ToolTip="Лаунчер перестанет доверять корневому сертификату Минцифры. Windows и другие программы это не затрагивает.">Отключить доверие к сертификату</Hyperlink>
+                        </TextBlock>
+                        <TextBlock>
+                            <Hyperlink Command="{Binding OpenNotesPageCommand}" ToolTip="Страница заметок о выпусках на help.pilotems.com">Все заметки о выпусках</Hyperlink>
+                        </TextBlock>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <RadioButton Content="Эта версия" IsChecked="{Binding NotesSingle}" GroupName="NotesMode" Margin="0,0,16,0" />
+                    <RadioButton Content="Что изменилось между версиями" IsChecked="{Binding NotesCompare}" GroupName="NotesMode" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                            Visibility="{Binding NotesCompare, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Сравнить с версией" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <ComboBox Width="180" ItemsSource="{Binding Versions}" SelectedItem="{Binding CompareVersion}" DisplayMemberPath="Version" />
+                </StackPanel>
+
+                <Border Visibility="{Binding HasNotesWarning, Converter={StaticResource BoolToVisibility}}"
+                        Background="#33FFB300" CornerRadius="6" Padding="12,8" Margin="0,12,0,0">
+                    <StackPanel>
+                        <TextBlock Text="{Binding NotesWarning}" TextWrapping="Wrap" />
+                        <StackPanel Margin="0,10,0,0" Visibility="{Binding CanTrustRussianRoot, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock TextWrapping="Wrap" Opacity="0.85"
+                                       Text="Лаунчер может доверять этому сертификату сам, только для help.pilotems.com. Windows, браузеры и другие программы при этом не меняются." />
+                            <Button Content="Установить" Command="{Binding TrustRussianRootCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" MinWidth="120" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding NotesCaption}" TextWrapping="Wrap" Opacity="0.75" Margin="0,12,0,0"
+                           Visibility="{Binding HasNotesCaption, Converter={StaticResource BoolToVisibility}}" />
+                <TextBlock Text="{Binding NotesStatus}" TextWrapping="Wrap" Opacity="0.75" Margin="0,12,0,0"
+                           Visibility="{Binding HasNotesStatus, Converter={StaticResource BoolToVisibility}}" />
+
+                <ItemsControl ItemsSource="{Binding NotesSections}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,16,0,0">
+                                <TextBlock Text="{Binding Header}" FontSize="15" FontWeight="SemiBold" />
+                                <ItemsControl ItemsSource="{Binding Notices}" Visibility="{Binding HasNotices, Converter={StaticResource BoolToVisibility}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#33FFB300" CornerRadius="6" Padding="12,8" Margin="0,8,0,0">
+                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <ItemsControl ItemsSource="{Binding Changes}" Margin="0,6,0,0" Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibility}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,3,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="18" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="-" />
+                                                <TextBlock Grid.Column="1" Text="{Binding}" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Expander Header="{Binding FixesHeader}" Margin="0,8,0,0" Visibility="{Binding HasFixes, Converter={StaticResource BoolToVisibility}}">
+                                    <ItemsControl ItemsSource="{Binding Fixes}" Margin="0,4,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,3,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="18" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="-" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding}" TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Expander>
+                                <TextBlock Text="{Binding Footnote}" TextWrapping="Wrap" Opacity="0.75" Margin="0,8,0,0"
+                                           Visibility="{Binding HasFootnote, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Background="#14808080" Padding="24,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                    <TextBlock Text="Редакция" FontSize="11" Opacity="0.65" Margin="2,0,0,2" />
+                    <ComboBox Width="160" ItemsSource="{Binding EditionList}" SelectedItem="{Binding SelectedEdition}"
+                              DisplayMemberPath="DisplayName" IsEnabled="{Binding IsIdle}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Версия" FontSize="11" Opacity="0.65" Margin="2,0,0,2" />
+                    <ComboBox Width="330" ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Version}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Marker}" Opacity="0.65" Margin="12,0,0,0" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Bottom">
+                    <Button Content="{Binding LaunchText}" Command="{Binding LaunchCommand}" MinWidth="180" Height="40" FontSize="15"
+                            FontWeight="SemiBold" Style="{StaticResource AccentButtonStyle}" Foreground="White" />
+                    <Button x:Name="MenuButton" Width="40" Height="40" Padding="0" Margin="2,0,0,0"
+                            Click="MenuButton_Click" ToolTip="Управление версией">
+                        <TextBlock Text="&#xE70D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

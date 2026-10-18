@@ -1,0 +1,23 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build PilotLauncher.sln -c Release
+
+      # tests that need Pilot setup files or the internet skip themselves when those are absent
+      - name: Test
+        run: dotnet test PilotLauncher.sln -c Release --no-build

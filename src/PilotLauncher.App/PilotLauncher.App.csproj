@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>PilotLauncher</AssemblyName>
+    <RootNamespace>PilotLauncher.App</RootNamespace>
+    <StartupObject>PilotLauncher.App.Program</StartupObject>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\launcher.ico</ApplicationIcon>
+    <Product>Pilot Launcher</Product>
+    <AssemblyTitle>Pilot Launcher</AssemblyTitle>
+    <Description>Лаунчер версий Pilot: скачивание, запуск нескольких версий рядом, расширения, заметки о выпуске.</Description>
+    <!-- WPF0001: the Fluent theme (ThemeMode) is still marked experimental in the SDK -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PilotLauncher.Core\PilotLauncher.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the tray icon needs WinForms, but its types must not clash with WPF ones (Application, MessageBox, Button) -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.Net.Http" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\launcher.ico" />
+  </ItemGroup>
+
+</Project>
+
+
