@@ -4,7 +4,7 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- the launcher runs as the analyst; only the admin helper copy is elevated, through the runas verb -->
+        <!-- the launcher runs as the current user; only the admin helper copy is elevated, through the runas verb -->
         <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>

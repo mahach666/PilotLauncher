@@ -21,7 +21,7 @@ public class SystemInstallTests
     private static UninstallEntry Bundle(string name, string version, string code, string setupName) =>
         new(name, version, version, $"\"{CacheRoot}\\{code}\\{setupName}\"  /uninstall");
 
-    /// <summary>The records of the analyst's PC: a stale 25.9 bundle beside the real 26.11 MSI, and other Pilot products.</summary>
+    /// <summary>Registry records of a PC with a stale 25.9 bundle beside the real 26.11 MSI, and other Pilot products.</summary>
     private static List<UninstallEntry> RealisticRegistry() =>
     [
         Msi("Pilot-Server", "26.11.0.61894", "{05CC7D28-7AB9-412E-BE02-732F66A31E59}"),

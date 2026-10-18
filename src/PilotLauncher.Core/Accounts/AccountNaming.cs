@@ -11,7 +11,7 @@ public static class AccountNaming
     public const int MaxLength = 20;
 
     /// <summary>
-    /// Four hex characters derived from the SID of the Windows user running the launcher. Two analysts sharing one PC
+    /// Four hex characters derived from the SID of the Windows user running the launcher. Two Windows users sharing one PC
     /// get separate accounts (and passwords) for the same version instead of resetting each other's.
     /// </summary>
     public static string OwnerTag(string userSid) =>
