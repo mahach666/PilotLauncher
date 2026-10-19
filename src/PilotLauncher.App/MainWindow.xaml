@@ -59,6 +59,30 @@
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="32,20,32,16">
+                <Border Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVisibility}}"
+                        Background="#3342A5F5" CornerRadius="6" Padding="12,10" Margin="0,0,0,16">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding UpdateText}" TextWrapping="Wrap" VerticalAlignment="Center" FontWeight="SemiBold" />
+                            <Button Grid.Column="1" Content="Обновить" Command="{Binding UpdateCommand}" MinWidth="110" Margin="12,0,0,0"
+                                    Style="{StaticResource AccentButtonStyle}" Foreground="White"
+                                    ToolTip="Скачать новую версию, заменить ею эту и перезапустить лаунчер" />
+                            <Button Grid.Column="2" Content="Позже" Command="{Binding DismissUpdateCommand}" Margin="8,0,0,0" />
+                        </Grid>
+                        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.85"
+                                   Visibility="{Binding UpdateWaitsForClients, Converter={StaticResource BoolToVisibility}}"
+                                   Text="Чтобы обновить, закройте запущенные клиенты Pilot: после перезапуска лаунчер не сможет подписывать версии в заголовках их окон." />
+                        <Expander Header="Что нового" Margin="0,6,0,0" Visibility="{Binding HasUpdateNotes, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding UpdateNotes}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        </Expander>
+                    </StackPanel>
+                </Border>
+
                 <Border Visibility="{Binding HasNotice, Converter={StaticResource BoolToVisibility}}"
                         Background="#33FFB300" CornerRadius="6" Padding="12,8" Margin="0,0,0,16">
                     <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" />

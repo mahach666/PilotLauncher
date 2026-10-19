@@ -5,17 +5,20 @@ namespace PilotLauncher.App;
 
 public partial class SettingsWindow : Window
 {
-    public SettingsWindow(string storeRoot, string? setupFolder, bool prerelease)
+    public SettingsWindow(string storeRoot, string? setupFolder, bool prerelease, bool checkUpdates)
     {
         InitializeComponent();
         PathBox.Text = storeRoot;
         SetupBox.Text = setupFolder ?? "";
         PrereleaseBox.IsChecked = prerelease;
+        CheckUpdatesBox.IsChecked = checkUpdates;
     }
 
     public string StoreRoot { get; private set; } = "";
 
     public bool Prerelease => PrereleaseBox.IsChecked == true;
+
+    public bool CheckUpdates => CheckUpdatesBox.IsChecked == true;
 
     /// <summary>Null when the field is empty: no installer folder.</summary>
     public string? SetupFolder { get; private set; }

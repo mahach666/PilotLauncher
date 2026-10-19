@@ -9,6 +9,7 @@ using PilotLauncher.Core.Launch;
 using PilotLauncher.Core.Library;
 using PilotLauncher.Core.Net;
 using PilotLauncher.Core.Notes;
+using PilotLauncher.Core.Update;
 
 namespace PilotLauncher.App;
 
@@ -103,6 +104,7 @@ public sealed class MainViewModel : ObservableObject
     private string _notesCaption = "";
     private string _notesStatus = "";
     private bool _notesCertificateProblem;
+    private Core.Extensions.ExtensionRelease? _availableUpdate;
 
     public MainViewModel(Func<AppServices> services)
     {
@@ -122,6 +124,8 @@ public sealed class MainViewModel : ObservableObject
         OpenNotesPageCommand = new RelayCommand(() => Process.Start(new ProcessStartInfo(ActiveNotes.PageUri.ToString()) { UseShellExecute = true }));
         TrustRussianRootCommand = new AsyncCommand(() => SetRussianRootTrustAsync(true), () => CanTrustRussianRoot, ShowError);
         StopTrustingRussianRootCommand = new AsyncCommand(() => SetRussianRootTrustAsync(false), () => IsRussianRootTrusted, ShowError);
+        UpdateCommand = new AsyncCommand(UpdateAsync, () => !IsBusy && HasUpdate && Running.Count == 0, ShowError);
+        DismissUpdateCommand = new RelayCommand(() => AvailableUpdate = null);
         Extensions = new ExtensionsViewModel(services, () => SelectedEntry, RunBusyAsync, () => IsIdle, p => ShowProgress(p), s => Status = s, ShowError);
     }
 
@@ -155,6 +159,8 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand OpenNotesPageCommand { get; }
     public AsyncCommand TrustRussianRootCommand { get; }
     public AsyncCommand StopTrustingRussianRootCommand { get; }
+    public AsyncCommand UpdateCommand { get; }
+    public RelayCommand DismissUpdateCommand { get; }
 
     /// <summary>Set by the window: shows which certificate would be trusted and asks to go on.</summary>
     public Func<PinnedRootTrust, bool>? ConfirmTrustRussianRoot { get; set; }
@@ -332,6 +338,8 @@ public sealed class MainViewModel : ObservableObject
         // installed and offline versions are shown before the network answers (or fails)
         await ReloadAsync(refreshCatalog: false);
         await ReloadAsync(refreshCatalog: true);
+        if (_services().Settings.CheckUpdates)
+            await CheckForUpdateAsync();
     }
 
     public async Task ReloadAsync(bool refreshCatalog)
@@ -593,7 +601,7 @@ public sealed class MainViewModel : ObservableObject
     private void RefreshCommands()
     {
         Raise(nameof(CanAct));
-        foreach (var command in new[] { LaunchCommand, LaunchIsolatedCommand, CopyToSeparateUserCommand, DeleteCommand, InstallToSystemCommand, RefreshCommand, AddFromFileCommand, DownloadForOfflineCommand })
+        foreach (var command in new[] { LaunchCommand, LaunchIsolatedCommand, CopyToSeparateUserCommand, DeleteCommand, InstallToSystemCommand, RefreshCommand, AddFromFileCommand, DownloadForOfflineCommand, UpdateCommand })
             command.RaiseCanExecuteChanged();
         OpenFolderCommand.RaiseCanExecuteChanged();
         Extensions.RaiseCommandStates();
@@ -848,22 +856,88 @@ public sealed class MainViewModel : ObservableObject
     private void Register(RunningClient client)
     {
         Running.Add(client);
-        Raise(nameof(RunningText));
-        RunningChanged?.Invoke();
+        OnRunningChanged();
         client.Process.Exited += (_, _) => Application.Current.Dispatcher.Invoke(() =>
         {
             Running.Remove(client);
-            Raise(nameof(RunningText));
-            RunningChanged?.Invoke();
+            OnRunningChanged();
         });
         // a process that already exited before we subscribed would never raise the event
         if (client.Process.HasExited)
             Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 Running.Remove(client);
-                Raise(nameof(RunningText));
-                RunningChanged?.Invoke();
+                OnRunningChanged();
             });
+    }
+
+    private void OnRunningChanged()
+    {
+        Raise(nameof(RunningText));
+        Raise(nameof(UpdateWaitsForClients));
+        UpdateCommand.RaiseCanExecuteChanged();
+        RunningChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Asks GitHub for a newer launcher; does nothing in a development build, which cannot replace itself. A failed check is only
+    /// logged: being offline must not get in the way at every start.
+    /// </summary>
+    public async Task CheckForUpdateAsync()
+    {
+        if (!SelfInstaller.IsSingleFile)
+            return;
+        try
+        {
+            AvailableUpdate = await _services().Updater.FindNewerAsync(SelfInstaller.CurrentVersion, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException or System.Text.Json.JsonException or KeyNotFoundException or IOException)
+        {
+            _services().Log.Error("Update check failed", ex);
+        }
+    }
+
+    public Core.Extensions.ExtensionRelease? AvailableUpdate
+    {
+        get => _availableUpdate;
+        private set
+        {
+            Set(ref _availableUpdate, value);
+            foreach (var name in new[] { nameof(HasUpdate), nameof(UpdateText), nameof(UpdateNotes), nameof(HasUpdateNotes), nameof(UpdateWaitsForClients) })
+                Raise(name);
+            UpdateCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public bool HasUpdate => AvailableUpdate is not null;
+    public string UpdateText => AvailableUpdate is { } u ? $"Доступна новая версия Pilot Launcher {u.Version?.ToString(3) ?? u.Tag} (у вас {SelfInstaller.CurrentVersion.ToString(3)})." : "";
+
+    /// <summary>The release text is the CHANGELOG section; its "###" headings are shown as plain lines.</summary>
+    public string UpdateNotes => AvailableUpdate?.Notes?.Replace("### ", "").Trim() ?? "";
+    public bool HasUpdateNotes => UpdateNotes.Length > 0;
+
+    /// <summary>The restarted launcher would not know the running clients and could not label their windows any more.</summary>
+    public bool UpdateWaitsForClients => HasUpdate && Running.Count > 0;
+
+    /// <summary>Set by the app: starts the given exe and closes this launcher.</summary>
+    public Action<string>? RestartAfterUpdate { get; set; }
+
+    private async Task UpdateAsync()
+    {
+        Error = null;
+        var release = AvailableUpdate ?? throw new InvalidOperationException("No update is available.");
+        var exe = Environment.ProcessPath ?? throw new InvalidOperationException("Не удалось определить путь к программе.");
+        var services = _services();
+        string? downloaded = null;
+        await RunBusyAsync(async ct =>
+        {
+            downloaded = await services.Updater.DownloadAsync(release, exe, new Progress<DownloadProgress>(p =>
+                ShowProgress(new InstallProgress(InstallStage.Downloading, p.Total is > 0 ? (double)p.Received / p.Total.Value : null),
+                    p.Total is > 0 ? $"Скачивание обновления {(double)p.Received / p.Total.Value:P0}" : "Скачивание обновления...")), ct);
+        });
+        LauncherUpdater.Replace(exe, downloaded!);
+        services.Log.Info($"Launcher updated from {SelfInstaller.CurrentVersion.ToString(3)} to {release.Tag}, restarting.");
+        RestartAfterUpdate?.Invoke(exe);
     }
 
     private void OpenFolder()

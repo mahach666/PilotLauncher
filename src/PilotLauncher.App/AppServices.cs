@@ -12,6 +12,7 @@ using PilotLauncher.Core.Library;
 using PilotLauncher.Core.Logging;
 using PilotLauncher.Core.Notes;
 using PilotLauncher.Core.Storage;
+using PilotLauncher.Core.Update;
 
 namespace PilotLauncher.App;
 
@@ -30,6 +31,7 @@ public sealed class AppServices
     public required SystemInstaller SystemInstaller { get; init; }
     public required PinnedRootTrust RussianRoot { get; init; }
     public required ExtensionService Extensions { get; init; }
+    public required LauncherUpdater Updater { get; init; }
 
     public static string ExeDirectory => AppContext.BaseDirectory;
 
@@ -61,7 +63,8 @@ public sealed class AppServices
         var extensions = new ExtensionService(store, new ExtensionStore(store.ExtensionsDir, log), new GitHubReleaseClient(http, paths.DataDir),
             new FileDownloader(http), new DiskSpace(), new ElevatedProfileLinker(store, provisioner, log),
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ownerTag, accountName, log);
-        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions };
+        var updater = new LauncherUpdater(new GitHubReleaseClient(http, paths.DataDir), new FileDownloader(http), log);
+        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions, Updater = updater };
     }
 
     private static HttpClient CreateHttpClient(RemoteCertificateValidationCallback certificateValidation)

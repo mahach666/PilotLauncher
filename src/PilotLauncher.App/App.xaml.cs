@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Windows;
+using PilotLauncher.Core.Update;
 using Forms = System.Windows.Forms;
 
 namespace PilotLauncher.App;
@@ -25,8 +27,24 @@ public partial class App : Application
         };
 
         Services = AppServices.Create();
+        if (Environment.ProcessPath is { } exe)
+            _ = LauncherUpdater.CleanUpAsync(exe, Services.Log);
+        try
+        {
+            SelfInstaller.RecordInstalledVersion();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Services.Log.Error("Could not record the launcher version in Apps & features", ex);
+        }
+
         _viewModel = new MainViewModel(() => Services);
         _viewModel.RunningChanged += OnRunningChanged;
+        _viewModel.RestartAfterUpdate = path =>
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = false });
+            Quit();
+        };
         _window = new MainWindow(_viewModel);
         _window.Closed += (_, _) => Quit();
         _window.IsVisibleChanged += (_, _) => UpdateTray();

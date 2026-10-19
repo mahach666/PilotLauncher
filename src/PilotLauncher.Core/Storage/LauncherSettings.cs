@@ -20,6 +20,9 @@ public sealed class LauncherSettings
     /// <summary>The version list and the notes come from the pre-release folder (<c>/beta/</c>) instead of the releases.</summary>
     public bool Prerelease { get; set; }
 
+    /// <summary>At start the launcher asks GitHub whether a newer launcher was released. On unless the user turned it off.</summary>
+    public bool CheckUpdates { get; set; } = true;
+
     /// <summary>A missing file means defaults; a damaged file is an error, not silently reset.</summary>
     public static LauncherSettings Load(string path)
     {

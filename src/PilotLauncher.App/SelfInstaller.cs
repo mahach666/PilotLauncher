@@ -28,7 +28,19 @@ public static class SelfInstaller
         Path.GetFileNameWithoutExtension(exePath)?.EndsWith("-Setup", StringComparison.OrdinalIgnoreCase) == true;
 
     /// <summary>A published single-file exe has no assembly file next to it; a development build does.</summary>
-    private static bool IsSingleFile => !File.Exists(Path.Combine(AppContext.BaseDirectory, "PilotLauncher.dll"));
+    public static bool IsSingleFile => !File.Exists(Path.Combine(AppContext.BaseDirectory, "PilotLauncher.dll"));
+
+    /// <summary>The running version, e.g. 1.1.0.</summary>
+    public static Version CurrentVersion => typeof(SelfInstaller).Assembly.GetName().Version ?? new Version(0, 0, 0);
+
+    /// <summary>After an update the installed copy shows its new version in "Apps &amp; features". A portable copy has no entry.</summary>
+    public static void RecordInstalledVersion()
+    {
+        if (!string.Equals(Environment.ProcessPath, InstalledExe, StringComparison.OrdinalIgnoreCase))
+            return;
+        using var key = Registry.CurrentUser.OpenSubKey(UninstallKey, writable: true);
+        key?.SetValue("DisplayVersion", CurrentVersion.ToString(3));
+    }
 
     public static int Run(bool install, bool quiet)
     {
@@ -61,7 +73,7 @@ public static class SelfInstaller
 
         using var key = Registry.CurrentUser.CreateSubKey(UninstallKey);
         key.SetValue("DisplayName", "Pilot Launcher");
-        key.SetValue("DisplayVersion", typeof(SelfInstaller).Assembly.GetName().Version?.ToString(3) ?? "1.0.0");
+        key.SetValue("DisplayVersion", CurrentVersion.ToString(3));
         key.SetValue("Publisher", "mahach666");
         key.SetValue("InstallLocation", InstallDir);
         key.SetValue("DisplayIcon", InstalledExe);
