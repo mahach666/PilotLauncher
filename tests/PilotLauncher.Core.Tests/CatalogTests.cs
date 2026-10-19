@@ -126,4 +126,47 @@ public class CatalogTests
 
         Assert.AreEqual($"https://pilot.ascon.ru/release/{entry.FileName}", catalog.GetDownloadUri(entry).ToString());
     }
+
+    [TestMethod]
+    public void PrereleasesAddOnlyBuildsThatWereNotReleased()
+    {
+        var enterprise = Editions.Get(EditionId.IceEnterprise);
+        ReleaseEntry Entry(string version, Uri folder) =>
+            new(enterprise, Version.Parse(version), $"Pilot-ICE-Enterprise-setup_{version}.zip", 1, null) { Folder = folder };
+        var releases = new[] { Entry("26.13.0.62219", ReleaseCatalog.DefaultBaseUri) };
+        var betas = new[] { Entry("26.19.0.65157", ReleaseCatalog.BetaBaseUri), Entry("26.13.0.62219", ReleaseCatalog.BetaBaseUri) };
+
+        var merged = ReleaseCatalog.WithPrereleases(releases, betas);
+
+        CollectionAssert.AreEquivalent(new[] { "26.13.0.62219 False", "26.19.0.65157 True" },
+            merged.Select(e => $"{e.Version} {e.IsPrerelease}").ToList());
+        Assert.IsFalse(new ReleaseEntry(enterprise, new Version(1, 0, 0, 0), "x.zip", 1, null).IsPrerelease, "an entry without a folder is a release");
+    }
+
+    [TestMethod]
+    public async Task BetaEntriesDownloadFromTheBetaFolderAlsoThroughTheReleaseCatalog()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var cache = Path.Combine(dir, "beta.html");
+            var online = new FakeFileHandler([]) { Override = _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Sample) } };
+            var live = await new ReleaseCatalog(new HttpClient(online), cache, ReleaseCatalog.BetaBaseUri).LoadAsync(CancellationToken.None);
+            var offline = new FakeFileHandler([]) { Override = _ => throw new HttpRequestException("no network") };
+            var cached = await new ReleaseCatalog(new HttpClient(offline), cache, ReleaseCatalog.BetaBaseUri).LoadAsync(CancellationToken.None);
+            Assert.IsTrue(cached.FromCache);
+
+            // the installers hold the release catalog; the entry decides where it is downloaded from
+            var release = new ReleaseCatalog(new HttpClient(), "unused");
+            foreach (var entry in new[] { live.Entries[0], cached.Entries[0] })
+            {
+                Assert.AreEqual($"https://pilot.ascon.ru/beta/{entry.FileName}", release.GetDownloadUri(entry).ToString());
+                Assert.IsTrue(entry.IsPrerelease);
+            }
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
 }

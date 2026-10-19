@@ -128,16 +128,22 @@ public partial class MainWindow : Window
 
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsWindow(App.Services.Settings.StoreRoot, App.Services.Settings.SetupFolder) { Owner = this };
+        var settings = App.Services.Settings;
+        var dialog = new SettingsWindow(settings.StoreRoot, settings.SetupFolder, settings.Prerelease) { Owner = this };
         if (dialog.ShowDialog() != true)
             return;
         try
         {
-            App.Services.Settings.StoreRoot = dialog.StoreRoot;
-            App.Services.Settings.SetupFolder = dialog.SetupFolder;
-            App.Services.Settings.Save(App.Services.Paths.SettingsFile);
+            var modeChanged = dialog.Prerelease != settings.Prerelease;
+            settings.StoreRoot = dialog.StoreRoot;
+            settings.SetupFolder = dialog.SetupFolder;
+            settings.Prerelease = dialog.Prerelease;
+            settings.Save(App.Services.Paths.SettingsFile);
             App.Services = AppServices.Create();
-            await _viewModel.ReloadAsync(refreshCatalog: false);
+            if (modeChanged)
+                await _viewModel.PrereleaseChangedAsync();
+            else
+                await _viewModel.ReloadAsync(refreshCatalog: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

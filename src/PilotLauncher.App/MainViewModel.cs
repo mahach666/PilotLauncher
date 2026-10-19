@@ -40,8 +40,11 @@ public sealed class VersionItem
     public bool IsReady => Entry.IsReady;
     public bool IsSystem => Entry.IsInSystem;
 
+    /// <summary>A build from the pre-release folder that is not among the releases.</summary>
+    public bool IsPrerelease => Entry.Release?.IsPrerelease == true;
+
     /// <summary>What screen readers and UI automation announce for the list entry.</summary>
-    public override string ToString() => $"{Version} {Marker}".Trim();
+    public override string ToString() => $"{Version} {(IsPrerelease ? "бета " : "")}{Marker}".Trim();
 }
 
 /// <summary>One release in the "what is new" list: what its notes say about the selected edition.</summary>
@@ -116,7 +119,7 @@ public sealed class MainViewModel : ObservableObject
         DownloadForOfflineCommand = new AsyncCommand(DownloadForOfflineAsync, () => !IsBusy && SelectedEntry?.Release is not null, ShowError);
         CancelCommand = new RelayCommand(() => _cts?.Cancel(), () => IsBusy && _cts is not null);
         DismissErrorCommand = new RelayCommand(() => Error = null);
-        OpenNotesPageCommand = new RelayCommand(() => Process.Start(new ProcessStartInfo(_services().Notes.PageUri.ToString()) { UseShellExecute = true }));
+        OpenNotesPageCommand = new RelayCommand(() => Process.Start(new ProcessStartInfo(ActiveNotes.PageUri.ToString()) { UseShellExecute = true }));
         TrustRussianRootCommand = new AsyncCommand(() => SetRussianRootTrustAsync(true), () => CanTrustRussianRoot, ShowError);
         StopTrustingRussianRootCommand = new AsyncCommand(() => SetRussianRootTrustAsync(false), () => IsRussianRootTrusted, ShowError);
         Extensions = new ExtensionsViewModel(services, () => SelectedEntry, RunBusyAsync, () => IsIdle, p => ShowProgress(p), s => Status = s, ShowError);
@@ -208,6 +211,21 @@ public sealed class MainViewModel : ObservableObject
 
     public bool IsIdle => !IsBusy;
 
+    /// <summary>The version list also offers the pre-release builds from <c>/beta/</c>, and the notes come from there.</summary>
+    public bool Prerelease => _services().Settings.Prerelease;
+
+    private ReleaseNotesCatalog ActiveNotes => Prerelease ? _services().BetaNotes : _services().Notes;
+
+    /// <summary>Called by the settings window after the mode was changed and saved: loads the list and notes of the new mode.</summary>
+    public async Task PrereleaseChangedAsync()
+    {
+        Raise(nameof(Prerelease));
+        // the other folder's versions must not stay offered while the new list loads
+        _catalog = [];
+        await ReloadAsync(refreshCatalog: false);
+        await ReloadAsync(refreshCatalog: true);
+    }
+
     public bool NotesSingle
     {
         get => !NotesCompare;
@@ -278,7 +296,7 @@ public sealed class MainViewModel : ObservableObject
         _ => "Недоступна",
     };
 
-    public string StateText => SelectedEntry switch
+    public string StateText => (SelectedVersion?.IsPrerelease == true ? "Предварительная версия, ещё не выпущена. " : "") + SelectedEntry switch
     {
         null => "",
         { IsInSystem: true, IsInStore: true } => "Установлена в системе. Есть и отдельная копия для запуска в своём профиле.",
@@ -320,25 +338,27 @@ public sealed class MainViewModel : ObservableObject
     {
         if (refreshCatalog)
         {
+            var prerelease = Prerelease;
             Status = "Загрузка списка версий...";
             ProgressIndeterminate = true;
-            try
-            {
-                var result = await _services().Catalog.LoadAsync(CancellationToken.None);
-                _catalog = result.Entries;
-                _catalogNotice = result.FromCache ? $"Нет связи с центром загрузок, показан сохранённый список. {result.Error}" : null;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TaskCanceledException)
-            {
-                _catalogNotice = "Каталога версий нет: нет связи с центром загрузок и нет сохранённого списка. " +
-                                 "Установленные в системе и скопированные версии, а также версии из папки с установщиками запускаются как обычно; " +
-                                 $"файл установщика можно добавить через меню «Файл». ({ex.Message})";
-            }
-            finally
-            {
-                ProgressIndeterminate = false;
-                Status = "";
-            }
+            var services = _services();
+            var releases = LoadListingAsync(services.Catalog, prerelease: false);
+            var betas = prerelease ? LoadListingAsync(services.BetaCatalog, prerelease: true) : Task.FromResult(NoListing);
+            var (releaseEntries, releaseNotice) = await releases;
+            var (betaEntries, betaNotice) = await betas;
+            // the mode was switched meanwhile: the reload of the new mode fills the list
+            if (prerelease != Prerelease)
+                return;
+            ProgressIndeterminate = false;
+            Status = "";
+            // a listing that failed keeps its last good entries
+            // shortcut: with no release list ever loaded, released builds from /beta/ are marked as pre-releases too
+            _catalog = ReleaseCatalog.WithPrereleases(
+                releaseEntries ?? _catalog.Where(e => !e.IsPrerelease).ToList(),
+                prerelease ? betaEntries ?? _catalog.Where(e => e.IsPrerelease).ToList() : []);
+            _catalogNotice = releaseNotice is null && betaNotice is null
+                ? null
+                : string.Join(Environment.NewLine, new[] { releaseNotice, betaNotice }.Where(n => n is not null));
         }
 
         await ScanSetupFolderAsync();
@@ -349,25 +369,56 @@ public sealed class MainViewModel : ObservableObject
             await LoadNotesAsync();
     }
 
+    private static readonly (IReadOnlyList<ReleaseEntry>? Entries, string? Notice) NoListing = (null, null);
+
+    /// <summary>One listing and what to tell about it; no entries when there is neither a connection nor a saved copy.</summary>
+    private async Task<(IReadOnlyList<ReleaseEntry>? Entries, string? Notice)> LoadListingAsync(ReleaseCatalog catalog, bool prerelease)
+    {
+        try
+        {
+            var result = await catalog.LoadAsync(CancellationToken.None);
+            return (result.Entries, !result.FromCache ? null : prerelease
+                ? $"Нет связи с папкой предварительных версий, показан сохранённый список. {result.Error}"
+                : $"Нет связи с центром загрузок, показан сохранённый список. {result.Error}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TaskCanceledException)
+        {
+            _services().Log.Error("Version listing failed", ex);
+            return (null, prerelease
+                ? $"Списка предварительных версий нет: нет связи с pilot.ascon.ru/beta и нет сохранённого списка. ({ex.Message})"
+                : "Каталога версий нет: нет связи с центром загрузок и нет сохранённого списка. " +
+                  "Установленные в системе и скопированные версии, а также версии из папки с установщиками запускаются как обычно; " +
+                  $"файл установщика можно добавить через меню «Файл». ({ex.Message})");
+        }
+    }
+
     private async Task LoadNotesAsync()
     {
         _notesLoaded = false;
         RebuildNotes();
+        var notes = ActiveNotes;
+        var host = notes.PageUri.Host;
+        // the launcher's own trust in the Russian root covers only some hosts; elsewhere the button would not help
+        var canTrust = _services().RussianRoot.Hosts.Contains(host);
         try
         {
-            var result = await _services().Notes.LoadAsync(CancellationToken.None);
+            var result = await notes.LoadAsync(CancellationToken.None);
+            if (notes != ActiveNotes)
+                return;
             _notes = result.Releases;
-            _notesCertificateProblem = result.CertificateProblem;
+            _notesCertificateProblem = result.CertificateProblem && canTrust;
             NotesWarning = result.Error is null
                 ? null
-                : $"Не удалось обновить заметки с help.pilotems.com, показана сохранённая копия от {result.FetchedUtc.ToLocalTime():dd.MM.yyyy}. Причина: {result.Error}";
+                : $"Не удалось обновить заметки с {host}, показана сохранённая копия от {result.FetchedUtc.ToLocalTime():dd.MM.yyyy}. Причина: {result.Error}";
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TaskCanceledException or IOException or UnauthorizedAccessException)
         {
             _services().Log.Error("Release notes failed", ex);
+            if (notes != ActiveNotes)
+                return;
             _notes = [];
-            _notesCertificateProblem = ReleaseNotesCatalog.IsCertificateProblem(ex);
-            NotesWarning = $"Не удалось получить заметки о выпуске с help.pilotems.com: {ReleaseNotesCatalog.Describe(ex)}";
+            _notesCertificateProblem = ReleaseNotesCatalog.IsCertificateProblem(ex) && canTrust;
+            NotesWarning = $"Не удалось получить заметки о выпуске с {host}: {ReleaseNotesCatalog.Describe(ex)}";
         }
 
         _notesLoaded = true;

@@ -4,9 +4,16 @@ using System.Text.RegularExpressions;
 namespace PilotLauncher.Core.Catalog;
 
 /// <param name="SizeBytes">Size from the directory listing; the server rounds it to K/M/G, so it is approximate.</param>
-public sealed record ReleaseEntry(Edition Edition, Version Version, string FileName, long SizeBytes, DateTime? Published);
+public sealed record ReleaseEntry(Edition Edition, Version Version, string FileName, long SizeBytes, DateTime? Published)
+{
+    /// <summary>Listing folder the entry was read from (<c>/release/</c> or <c>/beta/</c>); null means the folder of the catalog that downloads it.</summary>
+    public Uri? Folder { get; init; }
 
-/// <summary>Parses the nginx autoindex page at <c>https://pilot.ascon.ru/release/</c>.</summary>
+    /// <summary>Listed in the pre-release folder.</summary>
+    public bool IsPrerelease => Folder == ReleaseCatalog.BetaBaseUri;
+}
+
+/// <summary>Parses the nginx autoindex pages at <c>https://pilot.ascon.ru/release/</c> and <c>/beta/</c>.</summary>
 public static class ReleaseListingParser
 {
     private static readonly Regex Row = new(

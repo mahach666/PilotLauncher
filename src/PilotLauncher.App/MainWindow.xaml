@@ -37,7 +37,9 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="Pilot Launcher" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="{Binding RunningText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,16,0" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding RunningText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,16,0" />
+            </StackPanel>
             <!-- the icon font is set on the glyph only: a button's font is inherited by a context menu opened from it -->
             <Button Grid.Column="2" ToolTip="Файлы установщиков: добавить из файла, скачать для офлайна (можно и перетащить файл на окно)"
                     Click="FileMenu_Click" Height="34" Padding="12,0" Margin="0,0,6,0" AutomationProperties.Name="Файл">
@@ -159,7 +161,7 @@
                                        ToolTip="Лаунчер перестанет доверять корневому сертификату Минцифры. Windows и другие программы это не затрагивает.">Отключить доверие к сертификату</Hyperlink>
                         </TextBlock>
                         <TextBlock>
-                            <Hyperlink Command="{Binding OpenNotesPageCommand}" ToolTip="Страница заметок о выпусках на help.pilotems.com">Все заметки о выпусках</Hyperlink>
+                            <Hyperlink Command="{Binding OpenNotesPageCommand}" ToolTip="Страница заметок о выпусках в браузере">Все заметки о выпусках</Hyperlink>
                         </TextBlock>
                     </StackPanel>
                 </Grid>
@@ -265,6 +267,10 @@
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="{Binding Version}" FontWeight="SemiBold" />
+                                    <Border Background="#3342A5F5" CornerRadius="4" Padding="6,0" Margin="8,0,0,0" VerticalAlignment="Center"
+                                            Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="бета" FontSize="12" />
+                                    </Border>
                                     <TextBlock Text="{Binding Marker}" Opacity="0.65" Margin="12,0,0,0" />
                                 </StackPanel>
                             </DataTemplate>

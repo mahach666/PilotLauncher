@@ -26,6 +26,10 @@
             <TextBox x:Name="SetupBox" VerticalContentAlignment="Center" Height="32" />
             <Button Grid.Column="1" Content="Выбрать..." Margin="8,0,0,0" Height="32" Click="BrowseSetup_Click" />
         </Grid>
+        <TextBlock Text="Предварительные версии" FontSize="16" FontWeight="SemiBold" Margin="0,20,0,0" />
+        <CheckBox x:Name="PrereleaseBox" Content="Показывать предварительные версии" Margin="0,8,0,0" />
+        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.75"
+                   Text="В списке версий появятся сборки из pilot.ascon.ru/beta, которых нет среди выпусков, с пометкой «бета». Заметки о выпуске тоже берутся оттуда." />
         <TextBlock x:Name="ErrorText" Foreground="#E53935" Margin="0,8,0,0" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
             <Button Content="Сохранить" MinWidth="100" Margin="0,0,8,0" IsDefault="True" Click="Save_Click" />

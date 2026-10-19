@@ -16,6 +16,8 @@ public sealed class LauncherPaths
     public string CredentialsFile => Path.Combine(DataDir, "credentials.json");
     public string CatalogCacheFile => Path.Combine(DataDir, "release-listing.html");
     public string NotesCacheFile => Path.Combine(DataDir, "release-notes.html");
+    public string BetaCatalogCacheFile => Path.Combine(DataDir, "beta-listing.html");
+    public string BetaNotesCacheFile => Path.Combine(DataDir, "beta-notes.html");
     public string LogsDir => Path.Combine(DataDir, "logs");
 
     public LauncherPaths(string dataDir) => DataDir = dataDir;

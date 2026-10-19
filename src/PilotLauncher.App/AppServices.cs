@@ -23,6 +23,8 @@ public sealed class AppServices
     public required ILauncherLog Log { get; init; }
     public required ReleaseCatalog Catalog { get; init; }
     public required ReleaseNotesCatalog Notes { get; init; }
+    public required ReleaseCatalog BetaCatalog { get; init; }
+    public required ReleaseNotesCatalog BetaNotes { get; init; }
     public required VersionLibrary Library { get; init; }
     public required LaunchService Launch { get; init; }
     public required SystemInstaller SystemInstaller { get; init; }
@@ -42,6 +44,8 @@ public sealed class AppServices
         var http = CreateHttpClient(russianRoot.CreateCallback(() => settings.TrustRussianRoot));
         var catalog = new ReleaseCatalog(http, paths.CatalogCacheFile);
         var notes = new ReleaseNotesCatalog(http, paths.NotesCacheFile);
+        var betaCatalog = new ReleaseCatalog(http, paths.BetaCatalogCacheFile, ReleaseCatalog.BetaBaseUri);
+        var betaNotes = new ReleaseNotesCatalog(http, paths.BetaNotesCacheFile, ReleaseNotesCatalog.BetaPageUri);
         var installer = new VersionInstaller(store, catalog, new FileDownloader(http), new DiskSpace(), log);
         var credentials = new CredentialStore(paths.CredentialsFile, new DpapiProtector());
         var accountService = new LocalAccountService();
@@ -57,7 +61,7 @@ public sealed class AppServices
         var extensions = new ExtensionService(store, new ExtensionStore(store.ExtensionsDir, log), new GitHubReleaseClient(http, paths.DataDir),
             new FileDownloader(http), new DiskSpace(), new ElevatedProfileLinker(store, provisioner, log),
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ownerTag, accountName, log);
-        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions };
+        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions };
     }
 
     private static HttpClient CreateHttpClient(RemoteCertificateValidationCallback certificateValidation)

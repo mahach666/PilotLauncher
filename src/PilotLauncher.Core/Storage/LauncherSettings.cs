@@ -17,6 +17,9 @@ public sealed class LauncherSettings
     /// </summary>
     public bool TrustRussianRoot { get; set; }
 
+    /// <summary>The version list and the notes come from the pre-release folder (<c>/beta/</c>) instead of the releases.</summary>
+    public bool Prerelease { get; set; }
+
     /// <summary>A missing file means defaults; a damaged file is an error, not silently reset.</summary>
     public static LauncherSettings Load(string path)
     {

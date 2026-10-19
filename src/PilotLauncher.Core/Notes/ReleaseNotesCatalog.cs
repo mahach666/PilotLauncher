@@ -14,6 +14,9 @@ public sealed record NotesResult(IReadOnlyList<ReleaseNotes> Releases, DateTime 
 public sealed class ReleaseNotesCatalog
 {
     public static readonly Uri DefaultPageUri = new("https://help.pilotems.com/ru/Content/RelNotes.htm");
+
+    /// <summary>Notes of the pre-release builds, published next to them; the same markup, and also lists the regular releases.</summary>
+    public static readonly Uri BetaPageUri = new("https://pilot.ascon.ru/beta/Help/ru/RelNotes.htm");
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(1);
 
     private readonly HttpClient _http;
