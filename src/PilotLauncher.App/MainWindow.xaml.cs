@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using Microsoft.Win32;
 using PilotLauncher.Core.Install;
 using PilotLauncher.Core.Library;
+using PilotLauncher.Core.Storage;
 using Forms = System.Windows.Forms;
 
 namespace PilotLauncher.App;
@@ -16,6 +17,11 @@ public partial class MainWindow : Window
     public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
+        var settings = App.Services.Settings;
+        var area = SystemParameters.WorkArea;
+        (Width, Height) = WindowSizing.Choose(settings.WindowWidth, settings.WindowHeight, area.Width, area.Height, MinWidth, MinHeight);
+        if (settings.WindowMaximized)
+            WindowState = WindowState.Maximized;
         _viewModel = viewModel;
         DataContext = viewModel;
         viewModel.ConfirmDelete = ConfirmDelete;
@@ -164,9 +170,29 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Remembers the size for the next start. A maximized or minimized window keeps the size it returns to.</summary>
+    private void SaveWindowSize()
+    {
+        var settings = App.Services.Settings;
+        var size = WindowState == WindowState.Normal ? new Size(ActualWidth, ActualHeight) : RestoreBounds.Size;
+        settings.WindowWidth = size.Width;
+        settings.WindowHeight = size.Height;
+        settings.WindowMaximized = WindowState == WindowState.Maximized;
+        try
+        {
+            settings.Save(App.Services.Paths.SettingsFile);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // losing the size must not stop the window from closing
+            App.Services.Log.Error("Could not save the window size", ex);
+        }
+    }
+
     protected override void OnClosing(CancelEventArgs e)
     {
         base.OnClosing(e);
+        SaveWindowSize();
         if (!App.IsExiting && CloseRequestedWhileRunning)
         {
             // keep the process: it puts the version label on the windows of the running clients

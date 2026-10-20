@@ -24,6 +24,14 @@ public sealed class LauncherSettings
     /// <summary>At start the launcher asks GitHub whether a newer launcher was released. On unless the user turned it off.</summary>
     public bool CheckUpdates { get; set; } = true;
 
+    /// <summary>Size of the main window when it was last closed (not maximized); null until the first close. See <see cref="WindowSizing"/>.</summary>
+    public double? WindowWidth { get; set; }
+
+    public double? WindowHeight { get; set; }
+
+    /// <summary>The window was maximized when it was last closed.</summary>
+    public bool WindowMaximized { get; set; }
+
     /// <summary>Favorite versions as <c>"&lt;EditionId&gt; &lt;version&gt;"</c>; they are listed first and marked with a star.</summary>
     public List<string> Favorites { get; set; } = [];
 
