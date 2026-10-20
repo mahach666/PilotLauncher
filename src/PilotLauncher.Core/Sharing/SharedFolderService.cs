@@ -55,7 +55,8 @@ public sealed class SharedFolderService
         if (customAdded.Count == 0 && customRemoved.Count == 0)
             return;
 
-        var arguments = new List<string> { "apply-shares", "--owner", _ownerTag, "--data", _dataDir };
+        // the elevated copy works out the data folder to protect on its own, it is not passed on
+        var arguments = new List<string> { "apply-shares", "--owner", _ownerTag };
         // the accounts that exist now join the group; accounts made later join it when they are created
         var users = _credentials.Names().Where(n => SharedFolders.BelongsTo(n, _ownerTag)).OrderBy(n => n, StringComparer.Ordinal).ToList();
         if (users.Count > 0)

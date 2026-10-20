@@ -72,6 +72,10 @@ public static class SharedFolders
             return $"Папки нет: {full}.";
         if (Junction.IsLink(full))
             return "Ссылки на папки (junction, символические) не подходят: выберите саму папку.";
+        // a link may also stand higher in the path (C:\Mine\Link\System32): only the real path tells where the folder is
+        var linked = ThroughLink(full);
+        if (linked is not null)
+            return linked;
 
         var usersDir = Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         foreach (var protectedFolder in ProtectedExact(usersDir))
@@ -91,6 +95,23 @@ public static class SharedFolders
         }
 
         return null;
+    }
+
+    /// <summary>Null when the folder is where its path says; otherwise why the path cannot be trusted.</summary>
+    private static string? ThroughLink(string full)
+    {
+        try
+        {
+            using var handle = NativeFolder.Open(full, forChange: false);
+            var real = NativeFolder.FinalPath(handle);
+            return string.Equals(Normalize(real), full, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : $"Путь проходит через ссылку или короткое имя: на самом деле это {real}. Укажите настоящий путь.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return $"Не удалось проверить папку: {ex.Message}";
+        }
     }
 
     private static IEnumerable<string> ProtectedExact(string? usersDir)
@@ -117,6 +138,30 @@ public static class SharedFolders
             if (folder.Length > 0)
                 yield return Normalize(folder);
         }
+
+        // the launcher data of every Windows user of the PC, not only of the one who runs this: the elevated copy may be started by
+        // another administrator
+        foreach (var data in OtherProfilesLauncherData())
+            yield return data;
+    }
+
+    private static IEnumerable<string> OtherProfilesLauncherData()
+    {
+        var usersDir = Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        if (usersDir is null || !Directory.Exists(usersDir))
+            yield break;
+        string[] profiles;
+        try
+        {
+            profiles = Directory.GetDirectories(usersDir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            yield break;
+        }
+
+        foreach (var profile in profiles)
+            yield return Normalize(Path.Combine(profile, "AppData", "Local", "PilotLauncher"));
     }
 
     private static bool IsInside(string path, string tree) =>

@@ -129,8 +129,7 @@ public static class AdminCommands
                     break;
                 case "apply-shares":
                     var shares = sharing ?? throw new AdminOperationException("Общие папки здесь недоступны.");
-                    shares.Apply(Required(options, "--owner"), List(options, "--users", ','), List(options, "--add", '|'),
-                        List(options, "--remove", '|'), Required(options, "--data"));
+                    shares.Apply(Required(options, "--owner"), List(options, "--users", ','), List(options, "--add", '|'), List(options, "--remove", '|'));
                     break;
                 case "delete-user":
                     var doomed = LauncherAccountName(options);

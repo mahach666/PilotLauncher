@@ -67,7 +67,7 @@ public class SharedFolderTests
         public Fixture()
         {
             Directory.CreateDirectory(DataDir);
-            Admin = new SharedFolderAdmin(Accounts, Groups);
+            Admin = new SharedFolderAdmin(Accounts, Groups, DataDir);
             Accounts.Existing.Add(Mine);
             Accounts.Existing.Add(MineToo);
         }
@@ -224,7 +224,7 @@ public class SharedFolderTests
         using var fx = new Fixture();
         var folder = fx.Folder("Exchange");
 
-        fx.Admin.Apply(Owner, [Mine, MineToo, "plab12B26x1x1"], [folder], [], fx.DataDir); // the last one has no account yet
+        fx.Admin.Apply(Owner, [Mine, MineToo, "plab12B26x1x1"], [folder], []); // the last one has no account yet
 
         CollectionAssert.AreEqual(new[] { "create PilotLauncher-ab12", $"add PilotLauncher-ab12 {Mine}", $"add PilotLauncher-ab12 {MineToo}" }, fx.Groups.Calls);
         Assert.IsTrue(FolderAcl.Has(folder, GroupSid));
@@ -236,7 +236,7 @@ public class SharedFolderTests
         using var fx = new Fixture();
         fx.Groups.Groups["PilotLauncher-ab12"] = [];
 
-        fx.Admin.Apply(Owner, [Mine], [fx.Folder("A")], [], fx.DataDir);
+        fx.Admin.Apply(Owner, [Mine], [fx.Folder("A")], []);
 
         Assert.IsFalse(fx.Groups.Calls.Any(c => c.StartsWith("create")));
     }
@@ -247,9 +247,9 @@ public class SharedFolderTests
         using var fx = new Fixture();
         var folder = fx.Folder("Exchange");
 
-        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, [Mine, Foreign], [folder], [], fx.DataDir));
-        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply("ZZZZ", [], [folder], [], fx.DataDir));
-        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, ["Administrator"], [folder], [], fx.DataDir));
+        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, [Mine, Foreign], [folder], []));
+        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply("ZZZZ", [], [folder], []));
+        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, ["Administrator"], [folder], []));
 
         Assert.AreEqual(0, fx.Groups.Calls.Count);
         Assert.AreEqual(0, ExplicitRules(folder), "the folder was not changed");
@@ -262,7 +262,7 @@ public class SharedFolderTests
         var good = fx.Folder("Good");
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
 
-        var ex = Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, [Mine], [good, windows], [], fx.DataDir));
+        var ex = Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, [Mine], [good, windows], []));
 
         StringAssert.Contains(ex.Message, windows);
         Assert.AreEqual(0, fx.Groups.Calls.Count, "the group was not even created");
@@ -274,10 +274,10 @@ public class SharedFolderTests
     {
         using var fx = new Fixture();
         var folder = fx.Folder("Exchange");
-        fx.Admin.Apply(Owner, [Mine], [folder], [], fx.DataDir);
+        fx.Admin.Apply(Owner, [Mine], [folder], []);
         Assert.IsTrue(FolderAcl.Has(folder, GroupSid));
 
-        fx.Admin.Apply(Owner, [], [], [folder, Path.Combine(fx.Dir, "gone")], fx.DataDir);
+        fx.Admin.Apply(Owner, [], [], [folder, Path.Combine(fx.Dir, "gone")]);
 
         Assert.AreEqual(0, ExplicitRules(folder));
     }
@@ -287,7 +287,7 @@ public class SharedFolderTests
     {
         using var fx = new Fixture();
 
-        fx.Admin.Apply(Owner, [], [], [fx.Folder("Exchange")], fx.DataDir);
+        fx.Admin.Apply(Owner, [], [], [fx.Folder("Exchange")]);
 
         Assert.AreEqual(0, fx.Groups.Calls.Count);
     }
@@ -316,13 +316,144 @@ public class SharedFolderTests
         var result = Path.Combine(fx.Dir, "result.txt");
         int Run(SharedFolderAdmin? admin, params string[] args) => AdminCommands.Run([.. args, "--result", result], fx.Accounts, null, null, admin);
 
-        Assert.AreEqual(1, Run(null, "apply-shares", "--owner", Owner, "--data", fx.DataDir, "--add", folder), "no handler");
-        Assert.AreEqual(1, Run(fx.Admin, "apply-shares", "--owner", Owner, "--data", fx.DataDir, "--users", $"{Mine},{Foreign}", "--add", folder));
+        Assert.AreEqual(1, Run(null, "apply-shares", "--owner", Owner, "--add", folder), "no handler");
+        Assert.AreEqual(1, Run(fx.Admin, "apply-shares", "--owner", Owner, "--users", $"{Mine},{Foreign}", "--add", folder));
         Assert.AreEqual(0, fx.Groups.Calls.Count);
 
-        Assert.AreEqual(0, Run(fx.Admin, "apply-shares", "--owner", Owner, "--data", fx.DataDir, "--users", $"{Mine},{MineToo}", "--add", folder));
+        Assert.AreEqual(0, Run(fx.Admin, "apply-shares", "--owner", Owner, "--users", $"{Mine},{MineToo}", "--add", folder));
         Assert.IsTrue(FolderAcl.Has(folder, GroupSid));
-        Assert.AreEqual(1, Run(fx.Admin, "apply-shares", "--owner", Owner), "the data folder is required");
+        Assert.AreEqual(1, Run(fx.Admin, "apply-shares"), "the owner is required");
+        Assert.AreEqual(1, Run(fx.Admin, "apply-shares", "--owner", Owner, "--add", Path.Combine(fx.Dir, "nope")), "a folder that does not exist");
+    }
+
+    // ---- links on the way: a link higher in the path must not carry a protected folder past the rules
+
+    [TestMethod]
+    public void AFolderBehindALinkHigherInThePathIsRefused()
+    {
+        using var fx = new Fixture();
+        var real = fx.Folder("Real");
+        Directory.CreateDirectory(Path.Combine(real, "Sub"));
+        var link = Path.Combine(fx.Dir, "Link");
+        Junction.Create(link, real);
+        try
+        {
+            StringAssert.Contains(SharedFolders.Validate(Path.Combine(link, "Sub"), fx.DataDir)!, "ссылк");
+            Assert.IsNull(SharedFolders.Validate(Path.Combine(real, "Sub"), fx.DataDir), "the real path of the same folder is fine");
+        }
+        finally
+        {
+            Junction.Remove(link);
+        }
+    }
+
+    [TestMethod]
+    public void ALinkCannotCarryTheLauncherDataPastTheProtectedFolderRule()
+    {
+        using var fx = new Fixture();
+        var logs = Path.Combine(fx.DataDir, "logs");
+        Directory.CreateDirectory(logs);
+        var link = Path.Combine(fx.Dir, "Innocent");
+        Junction.Create(link, fx.DataDir);
+        try
+        {
+            // lexically "Innocent\logs" is nowhere near the data folder; in fact it is a folder inside it
+            Assert.IsNotNull(SharedFolders.Validate(Path.Combine(link, "logs"), fx.DataDir));
+            var ex = Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Apply(Owner, [Mine], [Path.Combine(link, "logs")], []));
+            StringAssert.Contains(ex.Message, "ссылк");
+            Assert.AreEqual(0, fx.Groups.Calls.Count, "nothing was created or granted");
+            Assert.AreEqual(0, ExplicitRules(logs));
+        }
+        finally
+        {
+            Junction.Remove(link);
+        }
+    }
+
+    [TestMethod]
+    public void TheGrantItselfRefusesAPathThroughALinkEvenWhenTheEarlierCheckWasSkipped()
+    {
+        using var fx = new Fixture();
+        var real = fx.Folder("Real");
+        var sub = Path.Combine(real, "Sub");
+        Directory.CreateDirectory(sub);
+        var link = Path.Combine(fx.Dir, "Link");
+        Junction.Create(link, real);
+        try
+        {
+            Assert.ThrowsExactly<AdminOperationException>(() => FolderAcl.Grant(Path.Combine(link, "Sub"), GroupSid));
+
+            Assert.AreEqual(0, ExplicitRules(sub));
+        }
+        finally
+        {
+            Junction.Remove(link);
+        }
+    }
+
+    [TestMethod]
+    public void TheCheckOfTheGrantGetsTheRealPathOfTheOpenedFolderAndCanStopTheChange()
+    {
+        using var fx = new Fixture();
+        var folder = fx.Folder("Exchange");
+        string? seen = null;
+
+        var ex = Assert.ThrowsExactly<AdminOperationException>(() => FolderAcl.Grant(folder, GroupSid, real => { seen = real; return "не годится"; }));
+
+        StringAssert.Contains(ex.Message, "не годится");
+        Assert.IsTrue(SharedFolders.SamePath(folder, seen!));
+        Assert.AreEqual(0, ExplicitRules(folder));
+    }
+
+    [TestMethod]
+    public void TheGrantByHandleReachesWhatIsAlreadyInTheFolderAndIsNotAddedTwice()
+    {
+        using var fx = new Fixture();
+        var folder = fx.Folder("Exchange");
+        var file = Path.Combine(folder, "a.txt");
+        File.WriteAllText(file, "x");
+        int InheritedOnFile() => new FileInfo(file).GetAccessControl()
+            .GetAccessRules(includeExplicit: false, includeInherited: true, typeof(SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Count(r => r.IdentityReference.Equals(GroupSid));
+        var before = InheritedOnFile();
+
+        FolderAcl.Grant(folder, GroupSid);
+        FolderAcl.Grant(folder, GroupSid);
+
+        Assert.AreEqual(1, ExplicitRules(folder), "one entry, not two");
+        Assert.IsTrue(InheritedOnFile() > before, "the file that was already there got the right from its folder");
+    }
+
+    [TestMethod]
+    public void TheGrantKeepsWhetherTheFolderInheritsRightsFromItsParent()
+    {
+        using var fx = new Fixture();
+        var open = fx.Folder("Open");
+        var closed = fx.Folder("Closed");
+        var info = new DirectoryInfo(closed);
+        var security = info.GetAccessControl();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: true);
+        info.SetAccessControl(security);
+
+        FolderAcl.Grant(open, GroupSid);
+        FolderAcl.Grant(closed, GroupSid);
+
+        Assert.IsFalse(new DirectoryInfo(open).GetAccessControl().AreAccessRulesProtected);
+        Assert.IsTrue(new DirectoryInfo(closed).GetAccessControl().AreAccessRulesProtected, "a folder that blocked inheritance still blocks it");
+    }
+
+    [TestMethod]
+    public void RevokingByHandleLeavesTheOtherRightsOfTheFolder()
+    {
+        using var fx = new Fixture();
+        var folder = fx.Folder("Exchange");
+        var before = new DirectoryInfo(folder).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)).Count;
+        FolderAcl.Grant(folder, GroupSid);
+
+        FolderAcl.Revoke(folder, GroupSid);
+
+        Assert.AreEqual(0, ExplicitRules(folder));
+        Assert.AreEqual(before, new DirectoryInfo(folder).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)).Count, "the rights of the owner and of the others are as they were");
     }
 
     [TestMethod]
@@ -393,7 +524,7 @@ public class SharedFolderTests
 
         var call = fx.Elevated.Single();
         CollectionAssert.AreEqual(
-            new[] { "apply-shares", "--owner", Owner, "--data", fx.DataDir, "--users", $"{Mine},{MineToo}", "--add", added, "--remove", removed },
+            new[] { "apply-shares", "--owner", Owner, "--users", $"{Mine},{MineToo}", "--add", added, "--remove", removed },
             call.ToArray(), "only this owner's accounts, the default folder is not in the list");
     }
 

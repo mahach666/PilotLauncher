@@ -26,7 +26,7 @@ public static class Program
                     SystemInstaller.SetupRoot(paths.DataDir), paths.LogsDir);
                 var localAccounts = new LocalAccountService();
                 return AdminCommands.Run(args.Skip(1).ToArray(), localAccounts, systemClient, new ProfileDevelopmentAdmin(new ProfileLocator()),
-                    new SharedFolderAdmin(localAccounts, localAccounts));
+                    new SharedFolderAdmin(localAccounts, localAccounts, paths.DataDir));
             case "--launch":
                 return HeadlessLaunch.Run(args.Skip(1).ToArray());
             case "--install":
