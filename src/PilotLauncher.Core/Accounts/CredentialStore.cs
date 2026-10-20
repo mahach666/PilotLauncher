@@ -71,6 +71,13 @@ public sealed class CredentialStore
         }
     }
 
+    /// <summary>The accounts that have a stored password, that is the isolated accounts this launcher has made.</summary>
+    public IReadOnlyList<string> Names()
+    {
+        lock (_gate)
+            return Load().Keys.ToList();
+    }
+
     public string GetOrCreate(string userName)
     {
         lock (_gate)

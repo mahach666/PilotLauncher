@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Настройки" Width="560" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
     <StackPanel Margin="24,20,24,20">
         <TextBlock Text="Папка для версий Pilot" FontSize="16" FontWeight="SemiBold" />
         <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.75"
@@ -34,10 +35,29 @@
         <CheckBox x:Name="CheckUpdatesBox" Content="Проверять обновления лаунчера при запуске" Margin="0,8,0,0" />
         <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.75"
                    Text="Лаунчер спрашивает GitHub, вышла ли новая версия, и предлагает обновиться одной кнопкой. Скачанный файл сверяется с контрольной суммой релиза." />
+        <TextBlock Text="Общие папки" FontSize="16" FontWeight="SemiBold" Margin="0,20,0,0" />
+        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.75"
+                   Text="Версии, которые запускаются в отдельном профиле, работают под своим пользователем Windows и не видят ваши файлы. Чтобы открыть файл в такой версии Pilot, положите его в общую папку: папки из списка доступны им на чтение и изменение." />
+        <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ListBox x:Name="SharedList" Height="96" SelectionChanged="SharedList_SelectionChanged" />
+            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                <Button Content="Добавить..." MinWidth="110" Click="AddShared_Click" />
+                <Button x:Name="RemoveSharedButton" Content="Убрать" MinWidth="110" Margin="0,6,0,0" Click="RemoveShared_Click" IsEnabled="False" />
+                <Button x:Name="OpenSharedButton" Content="Открыть" MinWidth="110" Margin="0,6,0,0" Click="OpenShared_Click" IsEnabled="False" />
+            </StackPanel>
+        </Grid>
+        <Button x:Name="CreateDefaultButton" Content="Создать папку по умолчанию" HorizontalAlignment="Left" Margin="0,10,0,0" Click="CreateDefaultShared_Click"
+                ToolTip="Создаёт общую папку в «Общих документах» Windows. Права для неё не нужны, запрос Windows не появится." />
+        <TextBlock x:Name="SharedHint" Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.65" FontSize="12" />
         <TextBlock x:Name="ErrorText" Foreground="#E53935" Margin="0,8,0,0" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
             <Button Content="Сохранить" MinWidth="100" Margin="0,0,8,0" IsDefault="True" Click="Save_Click" />
             <Button Content="Отмена" MinWidth="100" IsCancel="True" />
         </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 </Window>

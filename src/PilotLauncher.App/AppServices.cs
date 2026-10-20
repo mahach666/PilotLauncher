@@ -11,6 +11,7 @@ using PilotLauncher.Core.Launch;
 using PilotLauncher.Core.Library;
 using PilotLauncher.Core.Logging;
 using PilotLauncher.Core.Notes;
+using PilotLauncher.Core.Sharing;
 using PilotLauncher.Core.Storage;
 using PilotLauncher.Core.Update;
 
@@ -32,6 +33,7 @@ public sealed class AppServices
     public required PinnedRootTrust RussianRoot { get; init; }
     public required ExtensionService Extensions { get; init; }
     public required LauncherUpdater Updater { get; init; }
+    public required SharedFolderService SharedFolders { get; init; }
 
     public static string ExeDirectory => AppContext.BaseDirectory;
 
@@ -63,8 +65,9 @@ public sealed class AppServices
         var extensions = new ExtensionService(store, new ExtensionStore(store.ExtensionsDir, log), new GitHubReleaseClient(http, paths.DataDir),
             new FileDownloader(http), new DiskSpace(), new ElevatedProfileLinker(store, provisioner, log),
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ownerTag, accountName, log);
+        var sharedFolders = new SharedFolderService(ownerTag, credentials, paths.DataDir, ElevatedRunner.RunAsync, log);
         var updater = new LauncherUpdater(new GitHubReleaseClient(http, paths.DataDir), new FileDownloader(http), log);
-        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions, Updater = updater };
+        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions, Updater = updater, SharedFolders = sharedFolders };
     }
 
     private static HttpClient CreateHttpClient(RemoteCertificateValidationCallback certificateValidation)

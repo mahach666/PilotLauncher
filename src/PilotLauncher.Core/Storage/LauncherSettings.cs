@@ -32,6 +32,12 @@ public sealed class LauncherSettings
     /// <summary>The window was maximized when it was last closed.</summary>
     public bool WindowMaximized { get; set; }
 
+    /// <summary>
+    /// Folders opened to the isolated accounts (full paths): files put there can be opened in an isolated Pilot. See
+    /// <see cref="Sharing.SharedFolders"/>.
+    /// </summary>
+    public List<string> SharedFolders { get; set; } = [];
+
     /// <summary>Favorite versions as <c>"&lt;EditionId&gt; &lt;version&gt;"</c>; they are listed first and marked with a star.</summary>
     public List<string> Favorites { get; set; } = [];
 

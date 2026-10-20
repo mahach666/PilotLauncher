@@ -20,8 +20,46 @@ public interface ILocalAccounts
 }
 
 /// <summary>Local accounts through netapi32/userenv. Accounts are plain users, never administrators.</summary>
-public sealed class LocalAccountService : ILocalAccounts
+public sealed class LocalAccountService : ILocalAccounts, Sharing.ILocalGroups
 {
+    private const int NerrGroupNotFound = 2220;
+    private const int ErrorNoSuchAlias = 1376;
+    private const int NerrGroupExists = 2223;
+    private const int ErrorAliasExists = 1379;
+    private const int ErrorMemberInAlias = 1378;
+
+    bool Sharing.ILocalGroups.Exists(string group)
+    {
+        var rc = NetLocalGroupGetInfo(null, group, 0, out var buffer);
+        if (buffer != IntPtr.Zero)
+            NetApiBufferFree(buffer);
+        return rc switch
+        {
+            NerrSuccess => true,
+            NerrGroupNotFound or ErrorNoSuchAlias => false,
+            _ => throw new Win32Exception(rc, $"Cannot query group '{group}'."),
+        };
+    }
+
+    void Sharing.ILocalGroups.Create(string group, string comment)
+    {
+        var info = new LocalGroupInfo1 { Name = group, Comment = comment };
+        var rc = NetLocalGroupAdd(null, 1, ref info, out _);
+        if (rc is not (NerrSuccess or NerrGroupExists or ErrorAliasExists))
+            throw new Win32Exception(rc, $"Could not create the group '{group}' (NetApi error {rc}).");
+    }
+
+    void Sharing.ILocalGroups.AddMember(string group, string user)
+    {
+        var members = new LocalGroupMembersInfo3 { DomainAndName = $"{Environment.MachineName}\\{user}" };
+        var rc = NetLocalGroupAddMembers(null, group, 3, ref members, 1);
+        if (rc is not (NerrSuccess or ErrorMemberInAlias))
+            throw new Win32Exception(rc, $"Could not add '{user}' to the group '{group}' (NetApi error {rc}).");
+    }
+
+    SecurityIdentifier Sharing.ILocalGroups.SidOf(string group) =>
+        (SecurityIdentifier)new NTAccount(Environment.MachineName, group).Translate(typeof(SecurityIdentifier));
+
     private const int NerrSuccess = 0;
     private const int NerrUserNotFound = 2221;
     private const int UserPrivUser = 1;
@@ -145,6 +183,19 @@ public sealed class LocalAccountService : ILocalAccounts
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct LocalGroupMembersInfo3 { public string DomainAndName; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct LocalGroupInfo1
+    {
+        public string Name;
+        public string Comment;
+    }
+
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int NetLocalGroupGetInfo(string? server, string groupName, int level, out IntPtr buffer);
+
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int NetLocalGroupAdd(string? server, int level, ref LocalGroupInfo1 buffer, out int parameterError);
 
     [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
     private static extern int NetUserAdd(string? server, int level, ref UserInfo1 buffer, out int parameterError);

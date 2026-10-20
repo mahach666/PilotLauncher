@@ -108,7 +108,9 @@ public static class ElevatedRunner
 /// <summary>Body of <c>PilotLauncher.exe --admin ...</c>; reports failure through the exit code and the result file.</summary>
 public static class AdminCommands
 {
-    public static int Run(string[] args, ILocalAccounts accounts, SystemClientAdmin? systemClient = null, ProfileDevelopmentAdmin? development = null)
+    public static int Run(
+        string[] args, ILocalAccounts accounts, SystemClientAdmin? systemClient = null, ProfileDevelopmentAdmin? development = null,
+        Sharing.SharedFolderAdmin? sharing = null)
     {
         var options = ParseOptions(args.Skip(1).ToArray());
         options.TryGetValue("--result", out var resultFile);
@@ -122,6 +124,13 @@ public static class AdminCommands
                     var password = store.Get(user)
                                    ?? throw new AdminOperationException($"No stored password for {user}. Run the launcher as the user who created the account.");
                     accounts.Ensure(user, password, Required(options, "--fullname"), AccountNaming.Description);
+                    // folders may already be shared with the other isolated accounts of this owner
+                    sharing?.JoinIfGroupExists(user);
+                    break;
+                case "apply-shares":
+                    var shares = sharing ?? throw new AdminOperationException("Общие папки здесь недоступны.");
+                    shares.Apply(Required(options, "--owner"), List(options, "--users", ','), List(options, "--add", '|'),
+                        List(options, "--remove", '|'), Required(options, "--data"));
                     break;
                 case "delete-user":
                     var doomed = LauncherAccountName(options);
@@ -187,6 +196,12 @@ public static class AdminCommands
             ? name
             : throw new AdminOperationException($"'{name}' is not an account created by PilotLauncher; refusing to touch it.");
     }
+
+    /// <summary>An optional value of several items; absent means none.</summary>
+    private static IReadOnlyList<string> List(Dictionary<string, string> options, string name, char separator) =>
+        options.TryGetValue(name, out var value)
+            ? value.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
 
     private static string Required(Dictionary<string, string> options, string name) =>
         options.TryGetValue(name, out var value) ? value : throw new AdminOperationException($"Missing option {name}.");

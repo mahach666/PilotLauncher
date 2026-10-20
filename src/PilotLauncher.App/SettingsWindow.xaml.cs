@@ -1,20 +1,98 @@
 using System.Windows;
+using PilotLauncher.Core.Sharing;
 using Forms = System.Windows.Forms;
 
 namespace PilotLauncher.App;
 
 public partial class SettingsWindow : Window
 {
-    public SettingsWindow(string storeRoot, string? setupFolder, bool prerelease, bool checkUpdates)
+    public SettingsWindow(string storeRoot, string? setupFolder, bool prerelease, bool checkUpdates, IEnumerable<string> sharedFolders)
     {
         InitializeComponent();
+        // the window grows with its content but never beyond the screen: the rest is scrolled
+        MaxHeight = SystemParameters.WorkArea.Height * 0.95;
         PathBox.Text = storeRoot;
         SetupBox.Text = setupFolder ?? "";
         PrereleaseBox.IsChecked = prerelease;
         CheckUpdatesBox.IsChecked = checkUpdates;
+        foreach (var folder in sharedFolders)
+            SharedList.Items.Add(folder);
+        UpdateSharedHint();
     }
 
     public string StoreRoot { get; private set; } = "";
+
+    /// <summary>The shared folders as the user left the list.</summary>
+    public IReadOnlyList<string> SharedFolders => SharedList.Items.Cast<string>().ToList();
+
+    private void UpdateSharedHint()
+    {
+        var hasDefault = SharedList.Items.Cast<string>().Any(p => SharedFolderService.IsDefault(p));
+        CreateDefaultButton.IsEnabled = !hasDefault;
+        SharedHint.Text = hasDefault
+            ? "Папка по умолчанию создана в «Общих документах» Windows: права ей выдавать не нужно. Для остальных папок Windows один раз запросит подтверждение (права администратора)."
+            : $"Папка по умолчанию: {SharedFolderService.DefaultFolder}. Для любой другой папки Windows один раз запросит подтверждение (права администратора).";
+    }
+
+    private void SharedList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        RemoveSharedButton.IsEnabled = OpenSharedButton.IsEnabled = SharedList.SelectedItem is not null;
+    }
+
+    private void AddShared_Click(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog { ShowNewFolderButton = true, Description = "Папка, которую нужно открыть изолированным версиям Pilot" };
+        if (dialog.ShowDialog() != Forms.DialogResult.OK)
+            return;
+        if (Core.Sharing.SharedFolders.Validate(dialog.SelectedPath) is { } problem)
+        {
+            ErrorText.Text = problem;
+            return;
+        }
+
+        ErrorText.Text = "";
+        AddToList(Core.Sharing.SharedFolders.Normalize(dialog.SelectedPath));
+    }
+
+    private void CreateDefaultShared_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            AddToList(App.Services.SharedFolders.CreateDefault());
+            ErrorText.Text = "";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ErrorText.Text = $"Не удалось создать папку: {ex.Message}";
+        }
+    }
+
+    private void AddToList(string folder)
+    {
+        if (!SharedList.Items.Cast<string>().Any(p => Core.Sharing.SharedFolders.SamePath(p, folder)))
+            SharedList.Items.Add(folder);
+        UpdateSharedHint();
+    }
+
+    private void RemoveShared_Click(object sender, RoutedEventArgs e)
+    {
+        if (SharedList.SelectedItem is string folder)
+            SharedList.Items.Remove(folder);
+        UpdateSharedHint();
+    }
+
+    private void OpenShared_Click(object sender, RoutedEventArgs e)
+    {
+        if (SharedList.SelectedItem is not string folder)
+            return;
+        if (!Directory.Exists(folder))
+        {
+            ErrorText.Text = $"Папки больше нет: {folder}.";
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+    }
 
     public bool Prerelease => PrereleaseBox.IsChecked == true;
 

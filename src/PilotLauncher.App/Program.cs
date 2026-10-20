@@ -3,6 +3,7 @@ using System.Windows;
 using PilotLauncher.Core.Accounts;
 using PilotLauncher.Core.Extensions;
 using PilotLauncher.Core.Install;
+using PilotLauncher.Core.Sharing;
 using PilotLauncher.Core.Storage;
 
 namespace PilotLauncher.App;
@@ -23,7 +24,9 @@ public static class Program
                 var paths = LauncherPaths.Resolve(AppServices.ExeDirectory);
                 var systemClient = new SystemClientAdmin(new SystemInstallDetector(new AsconRegistry()), new UninstallRegistry(), new ProcessRunner(),
                     SystemInstaller.SetupRoot(paths.DataDir), paths.LogsDir);
-                return AdminCommands.Run(args.Skip(1).ToArray(), new LocalAccountService(), systemClient, new ProfileDevelopmentAdmin(new ProfileLocator()));
+                var localAccounts = new LocalAccountService();
+                return AdminCommands.Run(args.Skip(1).ToArray(), localAccounts, systemClient, new ProfileDevelopmentAdmin(new ProfileLocator()),
+                    new SharedFolderAdmin(localAccounts, localAccounts));
             case "--launch":
                 return HeadlessLaunch.Run(args.Skip(1).ToArray());
             case "--install":
