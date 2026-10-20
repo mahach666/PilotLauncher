@@ -27,6 +27,24 @@ public sealed record VersionEntry(
     public bool CanInstallFromFile => !IsReady && Setup is not null;
 }
 
+/// <summary>
+/// A copy was deleted but the isolated Windows user made for it (and its profile) is still there: Windows keeps a profile open
+/// while anything uses it, or the Windows prompt was declined. Nothing is lost; the user is reused if the version is installed again.
+/// </summary>
+public sealed class ProfileNotRemovedException : Exception
+{
+    public ProfileNotRemovedException(string account, Exception inner)
+        : base(Describe(account, inner), inner) => Account = account;
+
+    public string Account { get; }
+
+    private static string Describe(string account, Exception inner) =>
+        inner is OperationCanceledException
+            ? $"Копия удалена, но данные версии остались: вы отклонили запрос Windows, поэтому временный пользователь Windows {account} и его профиль не удалены."
+            : $"Копия удалена, но данные версии остались: временный пользователь Windows {account} и его профиль не удалены. {inner.Message} " +
+              "Если окон Pilot этой версии нет, Windows, скорее всего, ещё держит профиль открытым; помогает перезагрузка.";
+}
+
 /// <summary>Merges the download center listing, the store and the system installations.</summary>
 public sealed class VersionLibrary
 {
@@ -77,6 +95,16 @@ public sealed class VersionLibrary
             .ToList();
     }
 
+    /// <summary>
+    /// The version the "what changed" view compares <paramref name="selected"/> with by default: the next older one,
+    /// else the next newer one. It does not depend on the order of the list, which puts favorites first.
+    /// </summary>
+    public static Version? ComparisonPartner(IEnumerable<Version> versions, Version selected)
+    {
+        var others = versions.Where(v => v != selected).ToList();
+        return others.Where(v => v < selected).DefaultIfEmpty().Max() ?? others.DefaultIfEmpty().Min();
+    }
+
     public Task DownloadAsync(VersionEntry entry, IProgress<InstallProgress>? progress, CancellationToken ct) =>
         _installer.InstallAsync(
             entry.Release ?? throw new InvalidOperationException($"{entry.Edition.DisplayName} {entry.Version} is not in the download center."),
@@ -107,14 +135,17 @@ public sealed class VersionLibrary
 
     /// <summary>
     /// Removes the stored copy. The folder goes first: if a client still runs from it, nothing else has been touched.
-    /// The system installation is never modified.
+    /// The system installation is never modified. A folder that is already gone (an earlier attempt removed it and failed
+    /// later) is not an error, so the rest can still be done.
     /// </summary>
+    /// <exception cref="ProfileNotRemovedException">The copy is deleted, but its Windows user or profile could not be.</exception>
     public async Task DeleteStoredAsync(VersionEntry entry, bool deleteAccount, CancellationToken ct)
     {
         var stored = entry.Stored ?? throw new InvalidOperationException("This version is not in the store.");
         try
         {
-            Directory.Delete(stored.Directory, recursive: true);
+            if (Directory.Exists(stored.Directory))
+                Directory.Delete(stored.Directory, recursive: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -122,8 +153,18 @@ public sealed class VersionLibrary
         }
 
         _log.Info($"Deleted {entry.Edition.DisplayName} {entry.Version} from the store.");
-        if (deleteAccount)
-            await _accounts.DeleteAsync(_accountName(entry.Edition, entry.Version), deleteProfile: true, ct).ConfigureAwait(false);
+        if (!deleteAccount)
+            return;
+        var account = _accountName(entry.Edition, entry.Version);
+        try
+        {
+            await _accounts.DeleteAsync(account, deleteProfile: true, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is AdminOperationException or OperationCanceledException or System.ComponentModel.Win32Exception or IOException)
+        {
+            _log.Error($"The copy is deleted, but the account {account} could not be", ex);
+            throw new ProfileNotRemovedException(account, ex);
+        }
     }
 
     /// <summary>Total size of a stored version, for the details panel.</summary>

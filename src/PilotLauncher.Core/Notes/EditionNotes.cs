@@ -15,12 +15,18 @@ public static class EditionNotes
 {
     private static readonly string[] IceProducts = ["Pilot-ICE Desktop", "Pilot-ICE"];
     private static readonly string[] BimProducts = ["Pilot-BIM Desktop", "Pilot-BIM"];
+    private static readonly string[] MyAdminProducts = ["Pilot-myAdmin Desktop", "Pilot-myAdmin"]; // "Pilot-myAdmin Web" is another product
 
     /// <summary>
     /// Row titles of the notes that describe the edition. The plain names are from the 2024 releases, which did not split desktop and web.
     /// ICE Enterprise and ECM are built on the ICE client.
     /// </summary>
-    public static IReadOnlyList<string> Products(Edition edition) => edition.Id == EditionId.Bim ? BimProducts : IceProducts;
+    public static IReadOnlyList<string> Products(Edition edition) => edition.Id switch
+    {
+        EditionId.Bim => BimProducts,
+        EditionId.MyAdmin => MyAdminProducts,
+        _ => IceProducts,
+    };
 
     public static EditionDigest Digest(ReleaseNotes release, Edition edition)
     {

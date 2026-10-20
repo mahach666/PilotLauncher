@@ -15,6 +15,7 @@ public enum InstallStage
     Copying,
     Finishing,
     InstallingSystem,
+    UninstallingSystem,
 }
 
 /// <param name="Fraction">0..1 when the stage can tell how far it is, otherwise null.</param>

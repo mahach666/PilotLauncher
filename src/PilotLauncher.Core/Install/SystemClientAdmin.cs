@@ -96,6 +96,19 @@ public sealed class SystemClientAdmin
         Succeeded(_runner.Run(setupPath, $"/quiet /norestart /log \"{log}\""), "Установщик", log);
     }
 
+    /// <summary>
+    /// Removes the installed client of the edition (<c>--admin uninstall-client</c>). <paramref name="expected"/> must be the version
+    /// installed right now, so a user who saw 26.13 in the window never removes a 26.14 that was installed meanwhile.
+    /// </summary>
+    public void Remove(Edition edition, Version expected)
+    {
+        var installed = _installs.Detect().FirstOrDefault(i => i.Edition.Id == edition.Id)
+                        ?? throw new AdminOperationException($"{edition.DisplayName} не установлена в системе.");
+        if (installed.Version != expected)
+            throw new AdminOperationException($"В системе установлена {edition.DisplayName} {installed.Version}, а не {expected}; отказ.");
+        Uninstall(edition, installed.Version);
+    }
+
     private void Uninstall(Edition edition, Version installed)
     {
         var candidates = ClientUninstallLocator.Find(_uninstall.Entries(), edition, installed, _packageCacheRoot);

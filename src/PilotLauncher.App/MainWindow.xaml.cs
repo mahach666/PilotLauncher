@@ -25,6 +25,7 @@ public partial class MainWindow : Window
         viewModel.PickFolder = PickFolder;
         viewModel.AskSetup = AskSetup;
         viewModel.ConfirmInstallToSystem = ConfirmInstallToSystem;
+        viewModel.ConfirmUninstallFromSystem = ConfirmUninstallFromSystem;
         Loaded += async (_, _) => await InitializeAsync();
     }
 
@@ -110,6 +111,14 @@ public partial class MainWindow : Window
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
             await _viewModel.AddFilesAsync(files);
     }
+
+    private bool ConfirmUninstallFromSystem(VersionEntry entry) =>
+        MessageBox.Show(this,
+            $"Удалить {entry.Edition.DisplayName} {entry.Version} из системы?\n\n" +
+            "Версия будет удалена настоящим деинсталлятором Pilot для всех пользователей этого ПК. Windows запросит подтверждение (права администратора). " +
+            "Закройте Pilot этой редакции заранее.\n\n" +
+            (entry.IsInStore ? "Копия этой версии, скачанная лаунчером, останется и по-прежнему запускается в отдельном профиле." : "Версия пропадёт из списка, если её нет в центре загрузок."),
+            "Удаление из системы", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
 
     private bool ConfirmInstallToSystem(VersionEntry entry, SystemInstallPlan plan) =>
         new InstallToSystemDialog(entry, plan) { Owner = this }.ShowDialog() == true;

@@ -137,13 +137,13 @@ public static class AdminCommands
                     break;
                 case "replace-client":
                     var client = systemClient ?? throw new AdminOperationException("Установка в систему здесь недоступна.");
-                    var edition = SystemClientAdmin.TryParseEdition(Required(options, "--edition"), out var parsed)
-                        ? parsed
-                        : throw new AdminOperationException($"Неизвестная редакция '{options["--edition"]}'.");
-                    var version = Version.TryParse(Required(options, "--version"), out var target) && target.Revision >= 0
-                        ? target
-                        : throw new AdminOperationException($"Неверная версия '{options["--version"]}'.");
+                    var (edition, version) = ParseClient(options);
                     client.Replace(edition, version, Required(options, "--setup"));
+                    break;
+                case "uninstall-client":
+                    var remover = systemClient ?? throw new AdminOperationException("Удаление из системы здесь недоступно.");
+                    var (removedEdition, removedVersion) = ParseClient(options);
+                    remover.Remove(removedEdition, removedVersion);
                     break;
                 default:
                     throw new AdminOperationException($"Unknown admin command '{(args.Length > 0 ? args[0] : "")}'.");
@@ -166,6 +166,18 @@ public static class AdminCommands
         for (var i = 0; i + 1 < args.Length; i += 2)
             map[args[i]] = args[i + 1];
         return map;
+    }
+
+    /// <summary>The edition by its enum name (numbers are refused) and a four-number version, as the system client commands take them.</summary>
+    private static (Catalog.Edition Edition, Version Version) ParseClient(Dictionary<string, string> options)
+    {
+        var edition = SystemClientAdmin.TryParseEdition(Required(options, "--edition"), out var parsed)
+            ? parsed
+            : throw new AdminOperationException($"Неизвестная редакция '{options["--edition"]}'.");
+        var version = Version.TryParse(Required(options, "--version"), out var target) && target.Revision >= 0
+            ? target
+            : throw new AdminOperationException($"Неверная версия '{options["--version"]}'.");
+        return (edition, version);
     }
 
     private static string LauncherAccountName(Dictionary<string, string> options)

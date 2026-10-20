@@ -17,7 +17,10 @@
             <MenuItem Header="Открыть папку" Command="{Binding OpenFolderCommand}" />
             <MenuItem Header="Создать ярлык на рабочем столе" Command="{Binding CreateShortcutCommand}" />
             <Separator />
-            <MenuItem Header="Удалить..." Command="{Binding DeleteCommand}" />
+            <MenuItem Header="Удалить копию..." Command="{Binding DeleteCommand}"
+                      ToolTip="Удалить версию, скачанную лаунчером (для запуска в отдельном профиле). Установка в системе не затрагивается." />
+            <MenuItem Header="Удалить из системы..." Command="{Binding UninstallFromSystemCommand}"
+                      ToolTip="Удалить версию, установленную в системе, её деинсталлятором. Копия лаунчера остаётся." />
         </ContextMenu>
     </Window.Resources>
 
@@ -290,6 +293,9 @@
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE735;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FFC107"
+                                               VerticalAlignment="Center" Margin="0,0,6,0"
+                                               Visibility="{Binding IsFavorite, Converter={StaticResource BoolToVisibility}}" />
                                     <TextBlock Text="{Binding Version}" FontWeight="SemiBold" />
                                     <Border Background="#3342A5F5" CornerRadius="4" Padding="6,0" Margin="8,0,0,0" VerticalAlignment="Center"
                                             Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVisibility}}">
@@ -301,6 +307,22 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                 </StackPanel>
+
+                <Button Grid.Column="2" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,0,0,0" Width="36" Height="32" Padding="0"
+                        Command="{Binding ToggleFavoriteCommand}" ToolTip="{Binding FavoriteText}"
+                        AutomationProperties.Name="{Binding FavoriteText}">
+                    <TextBlock Text="{Binding FavoriteGlyph}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="15">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedVersion.IsFavorite}" Value="True">
+                                        <Setter Property="Foreground" Value="#FFC107" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Button>
 
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Bottom">
                     <Button Content="{Binding LaunchText}" Command="{Binding LaunchCommand}" MinWidth="180" Height="40" FontSize="15"

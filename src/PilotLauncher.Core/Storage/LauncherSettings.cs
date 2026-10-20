@@ -1,4 +1,5 @@
 using System.Text.Json;
+using PilotLauncher.Core.Catalog;
 
 namespace PilotLauncher.Core.Storage;
 
@@ -22,6 +23,22 @@ public sealed class LauncherSettings
 
     /// <summary>At start the launcher asks GitHub whether a newer launcher was released. On unless the user turned it off.</summary>
     public bool CheckUpdates { get; set; } = true;
+
+    /// <summary>Favorite versions as <c>"&lt;EditionId&gt; &lt;version&gt;"</c>; they are listed first and marked with a star.</summary>
+    public List<string> Favorites { get; set; } = [];
+
+    private static string FavoriteKey(EditionId edition, Version version) => $"{edition} {version}";
+
+    public bool IsFavorite(EditionId edition, Version version) => Favorites.Contains(FavoriteKey(edition, version));
+
+    public void SetFavorite(EditionId edition, Version version, bool favorite)
+    {
+        var key = FavoriteKey(edition, version);
+        if (favorite && !Favorites.Contains(key))
+            Favorites.Add(key);
+        else if (!favorite)
+            Favorites.Remove(key);
+    }
 
     /// <summary>A missing file means defaults; a damaged file is an error, not silently reset.</summary>
     public static LauncherSettings Load(string path)

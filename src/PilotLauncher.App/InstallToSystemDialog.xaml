@@ -6,10 +6,9 @@
     <StackPanel Margin="24,20,24,20">
         <TextBlock x:Name="Question" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
         <TextBlock x:Name="Action" Margin="0,10,0,0" TextWrapping="Wrap" />
-        <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.8"
-                   Text="Установка идёт настоящим установщиком Pilot и может занять несколько минут. Будет перезапущен драйвер виртуального диска. Windows запросит подтверждение (права администратора). Закройте Pilot этой редакции заранее." />
+        <TextBlock x:Name="Details" Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.8" />
         <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Opacity="0.65" FontSize="12"
-                   Text="Сервер, myAdmin и другие продукты Pilot не затрагиваются. Версии, скачанные лаунчером, и их данные остаются на месте." />
+                   Text="Сервер и другие редакции Pilot не затрагиваются. Версии, скачанные лаунчером, и их данные остаются на месте." />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
             <Button Content="Установить в систему" MinWidth="160" Margin="0,0,8,0" Click="Install_Click" />
             <Button Content="Отмена" MinWidth="100" IsDefault="True" IsCancel="True" />

@@ -1,12 +1,12 @@
 <Window x:Class="PilotLauncher.App.DeleteDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Удаление версии" Width="480" SizeToContent="Height" ResizeMode="NoResize"
+        Title="Удаление копии" Width="480" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
     <StackPanel Margin="24,20,24,20">
         <TextBlock x:Name="Question" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
         <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Opacity="0.8"
-                   Text="Файлы версии будут удалены с диска. Установка Pilot в системе не затрагивается." />
+                   Text="Будет удалена копия, скачанная лаунчером. Установка Pilot в системе не затрагивается: её удаляет пункт «Удалить из системы»." />
         <CheckBox x:Name="DeleteDataBox" IsChecked="True" Margin="0,16,0,0">
             <TextBlock TextWrapping="Wrap"
                        Text="Удалить также данные этой версии: сохранённые подключения, логины и локальный кэш" />

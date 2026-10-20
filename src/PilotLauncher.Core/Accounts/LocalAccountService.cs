@@ -95,7 +95,7 @@ public sealed class LocalAccountService : ILocalAccounts
             var sid = new NTAccount(userName).Translate(typeof(SecurityIdentifier)).Value;
             // 2 = ERROR_FILE_NOT_FOUND: the account never logged on, there is no profile
             if (!DeleteProfile(sid, null, null) && Marshal.GetLastWin32Error() is var error and not 2)
-                throw new Win32Exception(error, $"Cannot delete the profile of '{userName}'. Close its Pilot windows and retry.");
+                throw new Win32Exception(error, $"Не удалось удалить профиль пользователя {userName} (код Windows {error}). Закройте окна Pilot этой версии и повторите.");
         }
 
         Check(NetUserDel(null, userName), $"delete account '{userName}'");

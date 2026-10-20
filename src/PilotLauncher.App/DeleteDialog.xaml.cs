@@ -8,7 +8,7 @@ public partial class DeleteDialog : Window
     public DeleteDialog(VersionEntry entry)
     {
         InitializeComponent();
-        Question.Text = $"Удалить {entry.Edition.DisplayName} {entry.Version}?";
+        Question.Text = $"Удалить копию {entry.Edition.DisplayName} {entry.Version}?";
     }
 
     public bool DeleteData => DeleteDataBox.IsChecked == true;

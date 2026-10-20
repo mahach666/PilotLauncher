@@ -1,4 +1,5 @@
 using System.Windows;
+using PilotLauncher.Core.Catalog;
 using PilotLauncher.Core.Install;
 using PilotLauncher.Core.Library;
 
@@ -10,6 +11,10 @@ public partial class InstallToSystemDialog : Window
     {
         InitializeComponent();
         Question.Text = $"Установить {entry.Edition.DisplayName} {entry.Version} в систему?";
+        // the myAdmin package installs no virtual disk driver (its MSI has no such actions)
+        var driver = entry.Edition.Id == EditionId.MyAdmin ? "" : " Будет перезапущен драйвер виртуального диска.";
+        Details.Text = "Установка идёт настоящим установщиком Pilot и может занять несколько минут." + driver +
+                       " Windows запросит подтверждение (права администратора). Закройте Pilot этой редакции заранее.";
         Action.Text = plan.Action switch
         {
             SystemClientAction.Upgrade =>

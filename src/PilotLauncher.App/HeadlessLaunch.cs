@@ -12,7 +12,7 @@ public static class HeadlessLaunch
         try
         {
             if (args.Length != 2 || !Enum.TryParse<EditionId>(args[0], out var editionId) || !Version.TryParse(args[1], out var version))
-                throw new ArgumentException("Usage: --launch <IceEnterprise|Ice|Bim|Ecm> <version>");
+                throw new ArgumentException("Usage: --launch <IceEnterprise|Ice|Bim|Ecm|MyAdmin> <version>");
 
             services = AppServices.Create();
             var entry = services.Library.Build([]).FirstOrDefault(e => e.Edition.Id == editionId && e.Version == version)

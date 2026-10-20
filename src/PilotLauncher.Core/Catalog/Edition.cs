@@ -8,6 +8,7 @@ public enum EditionId
     Ice,
     Bim,
     Ecm,
+    MyAdmin,
 }
 
 /// <param name="SetupPrefix">File name prefix in the download center, e.g. <c>Pilot-ICE-Enterprise-setup</c>.</param>
@@ -27,6 +28,9 @@ public sealed record Edition(
     /// <summary>Folder name inside the store, e.g. <c>Pilot-ICE-Enterprise</c>.</summary>
     public string FolderName => SetupPrefix[..^"-setup".Length];
 
+    /// <summary>False for products that do not load Pilot extensions: myAdmin has no <c>Development</c> folder in its profile.</summary>
+    public bool SupportsExtensions { get; init; } = true;
+
     public override string ToString() => DisplayName;
 }
 
@@ -44,10 +48,13 @@ public static class Editions
             ["Pilot-BIM"], ["Ascon.Pilot.PilotBIM.exe"]),
         new(EditionId.Ecm, "ECM", "Pilot-ECM-setup", 'C', "Pilot-ECM",
             ["Pilot-ECM"], ["Ascon.Pilot.PilotECM.exe"]),
+        // checked on an installed 26.13: exe, ProductName, registry key and the "Programs and Features" name
+        new(EditionId.MyAdmin, "myAdmin", "Pilot-myAdmin-setup", 'M', "Pilot-myAdmin",
+            ["Pilot-myAdmin"], ["Ascon.Pilot.MyAdmin.exe"]) { SupportsExtensions = false },
     ];
 
     private static readonly Regex SetupFile = new(
-        @"^(?<prefix>Pilot-(?:ICE-Enterprise|ICE|BIM|ECM)-setup)_(?<version>\d+\.\d+\.\d+\.\d+)\.(?<ext>zip|exe)$",
+        @"^(?<prefix>Pilot-(?:ICE-Enterprise|ICE|BIM|ECM|myAdmin)-setup)_(?<version>\d+\.\d+\.\d+\.\d+)\.(?<ext>zip|exe)$",
         RegexOptions.CultureInvariant);
 
     public static Edition Get(EditionId id) => All.First(e => e.Id == id);

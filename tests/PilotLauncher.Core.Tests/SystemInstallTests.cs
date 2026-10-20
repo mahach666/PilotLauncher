@@ -362,6 +362,234 @@ public class SystemInstallTests
         return code;
     }
 
+    // ---- removing the system client without installing another one ----
+
+    private static readonly Edition Bim = Editions.Get(EditionId.Bim);
+    private const string BimMsiCode = "{8FB5DE34-5749-4BA8-813E-CD4B9E0877A0}";
+
+    [TestMethod]
+    public void AdminRemoveRunsOnlyTheUninstallRecordOfTheInstalledClient()
+    {
+        using var fx = new AdminFixture();
+        fx.Installs.Set(Enterprise, "26.11.0.61894");
+
+        fx.Admin.Remove(Enterprise, new Version(26, 11, 0, 61894));
+
+        var call = fx.Runner.Calls.Single();
+        Assert.AreEqual(Path.Combine(Environment.SystemDirectory, "msiexec.exe"), call.File);
+        Assert.AreEqual($"/x {IceMsiCode} /qn /norestart /l*v \"{Path.Combine(fx.Logs, "system-uninstall-IceEnterprise-26.11.0.61894.log")}\"", call.Arguments);
+    }
+
+    [TestMethod]
+    public void AdminRemoveUsesTheBundleOfAnOlderInstall()
+    {
+        using var fx = new AdminFixture();
+        fx.Installs.Set(Enterprise, "25.9.0.55929");
+        var bundle = Path.Combine(fx.PackageCache, IceBundleCode, "Pilot-ICE-Enterprise-setup.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(bundle)!);
+        File.WriteAllText(bundle, "bundle");
+        fx.Registry.Items.Clear();
+        fx.Registry.Items.Add(new UninstallEntry("Pilot-ICE Enterprise", "25.9.0.55929", "25.9.0.55929", $"\"{bundle}\"  /uninstall"));
+
+        fx.Admin.Remove(Enterprise, new Version(25, 9, 0, 55929));
+
+        var call = fx.Runner.Calls.Single();
+        Assert.AreEqual(bundle, call.File);
+        StringAssert.StartsWith(call.Arguments, "/uninstall /quiet /norestart /log ");
+    }
+
+    [TestMethod]
+    public void AdminRemoveRefusesWhenNothingOrAnotherVersionIsInstalled()
+    {
+        using var fx = new AdminFixture();
+        Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Remove(Enterprise, new Version(26, 11, 0, 61894)));
+
+        fx.Installs.Set(Enterprise, "26.11.0.61894");
+        var ex = Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Remove(Enterprise, new Version(26, 9, 0, 61368)));
+
+        StringAssert.Contains(ex.Message, "26.11.0.61894");
+        Assert.AreEqual(0, fx.Runner.Calls.Count, "nothing is uninstalled when the version in the window is not the installed one");
+    }
+
+    [TestMethod]
+    public void AdminRemoveTouchesOnlyTheClientOfTheRequestedEdition()
+    {
+        using var fx = new AdminFixture();
+        fx.Installs.Set(Enterprise, "26.11.0.61894");
+        fx.Installs.Items.Add(new SystemInstall(Bim, new Version(26, 11, 0, 61894), @"C:\Bim", @"C:\Bim\bim.exe"));
+
+        fx.Admin.Remove(Bim, new Version(26, 11, 0, 61894));
+
+        StringAssert.Contains(fx.Runner.Calls.Single().Arguments, BimMsiCode);
+        Assert.IsFalse(fx.Runner.Calls.Single().Arguments.Contains(IceMsiCode));
+    }
+
+    [TestMethod]
+    public void AdminRemoveWithoutAnUninstallRecordSaysSoAndRunsNothing()
+    {
+        using var fx = new AdminFixture();
+        fx.Installs.Set(Enterprise, "26.11.0.61894");
+        fx.Registry.Items.Clear();
+
+        var ex = Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Remove(Enterprise, new Version(26, 11, 0, 61894)));
+
+        StringAssert.Contains(ex.Message, "нет записи об удалении");
+        Assert.AreEqual(0, fx.Runner.Calls.Count);
+    }
+
+    [TestMethod]
+    public void AdminRemoveReportsAFailedUninstallAndAcceptsARestartCode()
+    {
+        using var fx = new AdminFixture();
+        fx.Installs.Set(Enterprise, "26.11.0.61894");
+        fx.Runner.ExitCode = 1603;
+
+        var ex = Assert.ThrowsExactly<AdminOperationException>(() => fx.Admin.Remove(Enterprise, new Version(26, 11, 0, 61894)));
+        StringAssert.Contains(ex.Message, "1603");
+        StringAssert.Contains(ex.Message, "system-uninstall-IceEnterprise-26.11.0.61894.log");
+
+        fx.Runner.ExitCode = 3010; // success, restart required
+        fx.Admin.Remove(Enterprise, new Version(26, 11, 0, 61894));
+    }
+
+    [TestMethod]
+    public void AdminCommandUninstallClientTakesTheSameCheckedArgumentsAsReplaceClient()
+    {
+        using var fx = new AdminFixture();
+        fx.Installs.Set(Enterprise, "26.11.0.61894");
+        int Run(params string[] args)
+        {
+            var result = Path.Combine(fx.Dir, "result.txt");
+            return AdminCommands.Run([.. args, "--result", result], new NoAccounts(), fx.Admin);
+        }
+
+        Assert.AreEqual(1, Run("uninstall-client", "--edition", "7", "--version", "26.11.0.61894"), "numeric edition ids are not accepted");
+        Assert.AreEqual(1, Run("uninstall-client", "--edition", "IceEnterprise", "--version", "26.11"), "a version needs four numbers");
+        Assert.AreEqual(1, Run("uninstall-client", "--edition", "IceEnterprise"), "the version is required");
+        Assert.AreEqual(0, fx.Runner.Calls.Count);
+
+        Assert.AreEqual(0, Run("uninstall-client", "--edition", "IceEnterprise", "--version", "26.11.0.61894"));
+        Assert.AreEqual(1, fx.Runner.Calls.Count);
+    }
+
+    [TestMethod]
+    public void AdminCommandUninstallClientIsRefusedWithoutASystemClientHandler()
+    {
+        var result = Path.Combine(TestSupport.NewTempDir(), "r.txt");
+        try
+        {
+            var code = AdminCommands.Run(["uninstall-client", "--edition", "Ice", "--version", "1.2.3.4", "--result", result], new NoAccounts());
+
+            Assert.AreEqual(1, code);
+            Assert.IsTrue(File.Exists(result));
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(Path.GetDirectoryName(result)!);
+        }
+    }
+
+    private static SystemInstaller InstallerFor(FakeInstalls installs, FakeProcesses processes, Func<IReadOnlyList<string>, Task> elevated, string dir) =>
+        new(installs, processes, new ReleaseCatalog(new HttpClient(), "unused"), new FileDownloader(new HttpClient()), new DiskSpace(_ => long.MaxValue),
+            (arguments, _) => elevated(arguments), Path.Combine(dir, "system-setup"), NullLog.Instance);
+
+    [TestMethod]
+    public async Task UserSideUninstallAsksTheElevatedCopyAndChecksTheClientIsGone()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var installs = new FakeInstalls();
+            installs.Set(Enterprise, "26.11.0.61894");
+            var calls = new List<IReadOnlyList<string>>();
+            var installer = InstallerFor(installs, new FakeProcesses(), arguments => { calls.Add(arguments); installs.Items.Clear(); return Task.CompletedTask; }, dir);
+            var stages = new List<InstallStage>();
+
+            await installer.UninstallAsync(Enterprise, new Version(26, 11, 0, 61894), new SyncProgress(p => stages.Add(p.Stage)), CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "uninstall-client", "--edition", "IceEnterprise", "--version", "26.11.0.61894" }, calls.Single().ToArray());
+            CollectionAssert.Contains(stages, InstallStage.UninstallingSystem);
+            Assert.IsFalse(Directory.Exists(Path.Combine(dir, "system-setup")), "no setup is staged for a removal");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task UserSideUninstallRefusesWhileTheClientRunsOrTheVersionIsNotTheInstalledOne()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var installs = new FakeInstalls();
+            installs.Set(Enterprise, "26.11.0.61894");
+            var processes = new FakeProcesses { Running = true };
+            var calls = 0;
+            var installer = InstallerFor(installs, processes, _ => { calls++; return Task.CompletedTask; }, dir);
+
+            await Assert.ThrowsExactlyAsync<ClientRunningException>(
+                () => installer.UninstallAsync(Enterprise, new Version(26, 11, 0, 61894), null, CancellationToken.None));
+
+            processes.Running = false;
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => installer.UninstallAsync(Enterprise, new Version(26, 9, 0, 61368), null, CancellationToken.None));
+            StringAssert.Contains(ex.Message, "26.11.0.61894");
+
+            installs.Items.Clear();
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => installer.UninstallAsync(Enterprise, new Version(26, 11, 0, 61894), null, CancellationToken.None));
+            Assert.AreEqual(0, calls, "the elevated copy is never started in these cases");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task UserSideUninstallFailsWhenTheClientIsStillThereAfterwards()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var installs = new FakeInstalls();
+            installs.Set(Enterprise, "26.11.0.61894");
+            var installer = InstallerFor(installs, new FakeProcesses(), _ => Task.CompletedTask, dir);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => installer.UninstallAsync(Enterprise, new Version(26, 11, 0, 61894), null, CancellationToken.None));
+
+            StringAssert.Contains(ex.Message, "всё ещё найдена");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task UserSideUninstallDeclinedConfirmationLeavesTheClientAndSaysNothingWasRemoved()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var installs = new FakeInstalls();
+            installs.Set(Enterprise, "26.11.0.61894");
+            var installer = InstallerFor(installs, new FakeProcesses(), _ => throw new OperationCanceledException("The administrator confirmation was declined."), dir);
+
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+                () => installer.UninstallAsync(Enterprise, new Version(26, 11, 0, 61894), null, CancellationToken.None));
+
+            Assert.AreEqual(1, installs.Detect().Count, "declining the Windows prompt leaves the client installed");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
     private sealed class NoAccounts : ILocalAccounts
     {
         public int Calls { get; private set; }

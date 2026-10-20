@@ -44,10 +44,12 @@ public class StorageAndLaunchTests
             return Task.CompletedTask;
         }
 
+        public Exception? DeleteFails { get; set; }
+
         public Task DeleteAsync(string userName, bool deleteProfile, CancellationToken ct)
         {
             Calls.Add($"delete {userName} {deleteProfile}");
-            return Task.CompletedTask;
+            return DeleteFails is null ? Task.CompletedTask : Task.FromException(DeleteFails);
         }
     }
 
@@ -317,6 +319,79 @@ public class StorageAndLaunchTests
             var offline = entries.Single(e => e.Version == new Version(25, 12, 0, 57162));
             Assert.IsTrue(!offline.IsReady && !offline.CanDownload && offline.CanInstallFromFile);
             Assert.AreEqual(setups[1], offline.Setup);
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task WhenTheProfileCannotBeRemovedTheCopyIsStillDeletedAndTheErrorSaysWhatStayed()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            var a = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            var provisioner = new FakeProvisioner { DeleteFails = new AdminOperationException("Не удалось удалить профиль (код Windows 5).") };
+            var library = NewLibrary(store, new FakeRegistry(), provisioner);
+            var entry = library.Build([]).Single();
+
+            var ex = await Assert.ThrowsExactlyAsync<ProfileNotRemovedException>(() => library.DeleteStoredAsync(entry, deleteAccount: true, CancellationToken.None));
+
+            Assert.IsFalse(Directory.Exists(a.Directory), "the copy is gone");
+            Assert.AreEqual(0, store.Enumerate().Count(), "so it is no longer a stored version");
+            StringAssert.StartsWith(ex.Message, "Копия удалена");
+            StringAssert.Contains(ex.Message, ex.Account);
+            Assert.AreEqual(AccountNaming.UserName("abcd", entry.Edition, entry.Version), ex.Account);
+            StringAssert.Contains(ex.Message, "код Windows 5", "the reason of Windows is shown");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task ADeclinedWindowsPromptLeavesTheAccountAndSaysSo()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            var provisioner = new FakeProvisioner { DeleteFails = new OperationCanceledException("The administrator confirmation was declined.") };
+            var library = NewLibrary(store, new FakeRegistry(), provisioner);
+
+            var ex = await Assert.ThrowsExactlyAsync<ProfileNotRemovedException>(
+                () => library.DeleteStoredAsync(library.Build([]).Single(), deleteAccount: true, CancellationToken.None));
+
+            StringAssert.Contains(ex.Message, "отклонили запрос Windows");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task DeletingAgainAfterAnEarlierAttemptRemovedTheFolderGoesOnToTheAccount()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            var a = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            var provisioner = new FakeProvisioner();
+            var library = NewLibrary(store, new FakeRegistry(), provisioner);
+            var entry = library.Build([]).Single();
+            Directory.Delete(a.Directory, recursive: true); // what the first attempt did before it failed
+
+            await library.DeleteStoredAsync(entry, deleteAccount: true, CancellationToken.None);
+
+            Assert.AreEqual(1, provisioner.Calls.Count, "the account is dealt with, no 'could not find the path' error");
+            StringAssert.StartsWith(provisioner.Calls[0], "delete pl");
         }
         finally
         {

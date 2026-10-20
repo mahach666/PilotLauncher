@@ -26,9 +26,14 @@ public static class Format
 
 public sealed class VersionItem
 {
-    public VersionItem(VersionEntry entry) => Entry = entry;
+    public VersionItem(VersionEntry entry, bool isFavorite)
+    {
+        Entry = entry;
+        IsFavorite = isFavorite;
+    }
 
     public VersionEntry Entry { get; }
+    public bool IsFavorite { get; }
     public string Version => Entry.Version.ToString();
 
     public string Marker =>
@@ -45,7 +50,7 @@ public sealed class VersionItem
     public bool IsPrerelease => Entry.Release?.IsPrerelease == true;
 
     /// <summary>What screen readers and UI automation announce for the list entry.</summary>
-    public override string ToString() => $"{Version} {(IsPrerelease ? "бета " : "")}{Marker}".Trim();
+    public override string ToString() => $"{(IsFavorite ? "избранная " : "")}{Version} {(IsPrerelease ? "бета " : "")}{Marker}".Trim();
 }
 
 /// <summary>One release in the "what is new" list: what its notes say about the selected edition.</summary>
@@ -113,6 +118,7 @@ public sealed class MainViewModel : ObservableObject
         LaunchIsolatedCommand = new AsyncCommand(() => LaunchAsync(forceIsolated: true), () => CanAct && SelectedEntry is { IsInSystem: true, IsInStore: true }, ShowError);
         CopyToSeparateUserCommand = new AsyncCommand(CopyToSeparateUserAsync, () => CanAct && SelectedEntry is { IsInSystem: true, IsInStore: false }, ShowError);
         DeleteCommand = new AsyncCommand(DeleteAsync, () => CanAct && SelectedEntry?.IsInStore == true, ShowError);
+        UninstallFromSystemCommand = new AsyncCommand(UninstallFromSystemAsync, () => CanAct && SelectedEntry?.IsInSystem == true, ShowError);
         InstallToSystemCommand = new AsyncCommand(InstallToSystemAsync, () => CanAct && SelectedEntry is { IsInSystem: false } e && SetupSourceFor(e) is not null, ShowError);
         RefreshCommand = new AsyncCommand(RefreshAllAsync, () => !IsBusy, ShowError);
         OpenFolderCommand = new RelayCommand(OpenFolder, () => SelectedEntry?.IsReady == true);
@@ -124,6 +130,7 @@ public sealed class MainViewModel : ObservableObject
         OpenNotesPageCommand = new RelayCommand(() => Process.Start(new ProcessStartInfo(ActiveNotes.PageUri.ToString()) { UseShellExecute = true }));
         TrustRussianRootCommand = new AsyncCommand(() => SetRussianRootTrustAsync(true), () => CanTrustRussianRoot, ShowError);
         StopTrustingRussianRootCommand = new AsyncCommand(() => SetRussianRootTrustAsync(false), () => IsRussianRootTrusted, ShowError);
+        ToggleFavoriteCommand = new RelayCommand(ToggleFavorite, () => SelectedEntry is not null);
         UpdateCommand = new AsyncCommand(UpdateAsync, () => !IsBusy && HasUpdate && Running.Count == 0, ShowError);
         DismissUpdateCommand = new RelayCommand(() => AvailableUpdate = null);
         Extensions = new ExtensionsViewModel(services, () => SelectedEntry, RunBusyAsync, () => IsIdle, p => ShowProgress(p), s => Status = s, ShowError);
@@ -148,6 +155,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand LaunchIsolatedCommand { get; }
     public AsyncCommand CopyToSeparateUserCommand { get; }
     public AsyncCommand DeleteCommand { get; }
+    public AsyncCommand UninstallFromSystemCommand { get; }
     public AsyncCommand InstallToSystemCommand { get; }
     public AsyncCommand RefreshCommand { get; }
     public AsyncCommand AddFromFileCommand { get; }
@@ -160,6 +168,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand TrustRussianRootCommand { get; }
     public AsyncCommand StopTrustingRussianRootCommand { get; }
     public AsyncCommand UpdateCommand { get; }
+    public RelayCommand ToggleFavoriteCommand { get; }
     public RelayCommand DismissUpdateCommand { get; }
 
     /// <summary>Set by the window: shows which certificate would be trusted and asks to go on.</summary>
@@ -179,6 +188,9 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>Set by the window: shows what the system install will do and asks to go on.</summary>
     public Func<VersionEntry, SystemInstallPlan, bool>? ConfirmInstallToSystem { get; set; }
+
+    /// <summary>Set by the window: asks whether to remove the version installed in the system. False means no.</summary>
+    public Func<VersionEntry, bool>? ConfirmUninstallFromSystem { get; set; }
 
     public event Action? RunningChanged;
 
@@ -327,6 +339,33 @@ public sealed class MainViewModel : ObservableObject
     };
 
     public string RunningText => Running.Count == 0 ? "" : $"Запущено клиентов: {Running.Count}";
+
+    /// <summary>Segoe Fluent Icons: a filled star for a favorite version, an outline for the others.</summary>
+    public string FavoriteGlyph => SelectedVersion?.IsFavorite == true ? "" : "";
+    public string FavoriteText => SelectedVersion?.IsFavorite == true ? "Убрать из избранного" : "Добавить в избранное";
+
+    private void ToggleFavorite()
+    {
+        var entry = SelectedEntry ?? throw new InvalidOperationException("No version selected.");
+        var settings = _services().Settings;
+        var favorite = !settings.IsFavorite(entry.Edition.Id, entry.Version);
+        settings.SetFavorite(entry.Edition.Id, entry.Version, favorite);
+        try
+        {
+            settings.Save(_services().Paths.SettingsFile);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            settings.SetFavorite(entry.Edition.Id, entry.Version, !favorite);
+            ShowError(ex);
+            return;
+        }
+
+        FillVersions(entry);
+        // the list is rebuilt with new items; the star of the selected one may not have been re-read yet
+        Raise(nameof(FavoriteGlyph));
+        Raise(nameof(FavoriteText));
+    }
 
     public async Task InitializeAsync()
     {
@@ -480,10 +519,19 @@ public sealed class MainViewModel : ObservableObject
 
     private void FillVersions(VersionEntry? keep)
     {
-        var items = _all.Where(e => e.Edition.Id == SelectedEdition.Id).Select(e => new VersionItem(e)).ToList();
+        var settings = _services().Settings;
+        // favorites first; OrderBy is stable, so the rest stays newest first
+        var items = _all.Where(e => e.Edition.Id == SelectedEdition.Id)
+            .Select(e => new VersionItem(e, settings.IsFavorite(e.Edition.Id, e.Version)))
+            .OrderByDescending(i => i.IsFavorite)
+            .ToList();
+        var compare = CompareVersion?.Entry;
         Versions.Clear();
         foreach (var item in items)
             Versions.Add(item);
+        // the items are new objects: the version chosen for comparison has to be found again in them
+        _compareVersion = compare is null ? null : items.FirstOrDefault(i => i.Entry.Edition.Id == compare.Edition.Id && i.Entry.Version == compare.Version);
+        Raise(nameof(CompareVersion));
         SelectedVersion =
             items.FirstOrDefault(i => keep is not null && i.Entry.Version == keep.Version && i.Entry.Edition.Id == keep.Edition.Id)
             ?? items.FirstOrDefault(i => i.Entry.IsInSystem)
@@ -493,7 +541,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void OnSelectionChanged()
     {
-        foreach (var name in new[] { nameof(SelectedEntry), nameof(CanAct), nameof(Title), nameof(LaunchText), nameof(StateText), nameof(ReleasedText), nameof(FolderText), nameof(ShowUpdateWarning) })
+        foreach (var name in new[] { nameof(SelectedEntry), nameof(CanAct), nameof(Title), nameof(LaunchText), nameof(StateText), nameof(ReleasedText), nameof(FolderText), nameof(ShowUpdateWarning), nameof(FavoriteGlyph), nameof(FavoriteText) })
             Raise(name);
         SizeText = SelectedEntry switch
         {
@@ -512,13 +560,13 @@ public sealed class MainViewModel : ObservableObject
             _ = ShowSizeOnDiskAsync(systemEntry, system.InstallDir);
     }
 
-    /// <summary>Keeps the version to compare with in the list and different from the selected one; the default is the next older version.</summary>
+    /// <summary>Keeps the version to compare with in the list and different from the selected one; the default is the next older version (<see cref="VersionLibrary.ComparisonPartner"/>).</summary>
     private void PickCompareVersion()
     {
         if (CompareVersion is not null && Versions.Contains(CompareVersion) && CompareVersion != SelectedVersion)
             return;
-        var index = SelectedVersion is null ? -1 : Versions.IndexOf(SelectedVersion);
-        _compareVersion = index < 0 ? null : index + 1 < Versions.Count ? Versions[index + 1] : index > 0 ? Versions[index - 1] : null;
+        var partner = SelectedVersion is null ? null : VersionLibrary.ComparisonPartner(Versions.Select(v => v.Entry.Version), SelectedVersion.Entry.Version);
+        _compareVersion = partner is null ? null : Versions.First(v => v.Entry.Version == partner);
         Raise(nameof(CompareVersion));
     }
 
@@ -601,9 +649,10 @@ public sealed class MainViewModel : ObservableObject
     private void RefreshCommands()
     {
         Raise(nameof(CanAct));
-        foreach (var command in new[] { LaunchCommand, LaunchIsolatedCommand, CopyToSeparateUserCommand, DeleteCommand, InstallToSystemCommand, RefreshCommand, AddFromFileCommand, DownloadForOfflineCommand, UpdateCommand })
+        foreach (var command in new[] { LaunchCommand, LaunchIsolatedCommand, CopyToSeparateUserCommand, DeleteCommand, UninstallFromSystemCommand, InstallToSystemCommand, RefreshCommand, AddFromFileCommand, DownloadForOfflineCommand, UpdateCommand })
             command.RaiseCanExecuteChanged();
         OpenFolderCommand.RaiseCanExecuteChanged();
+        ToggleFavoriteCommand.RaiseCanExecuteChanged();
         Extensions.RaiseCommandStates();
         CreateShortcutCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
@@ -785,21 +834,51 @@ public sealed class MainViewModel : ObservableObject
         var deleteData = ConfirmDelete?.Invoke(entry);
         if (deleteData is null)
             return;
-        await RunBusyAsync(async ct =>
+        string? leftover = null;
+        try
         {
-            Status = "Удаление...";
-            ProgressIndeterminate = true;
-            await _services().Library.DeleteStoredAsync(entry, deleteData.Value, ct);
-            // the account is gone: so are its extension links and the shared copies nobody else uses
-            if (deleteData.Value)
-                _services().Extensions.ForgetAccount(_services().Launch.AccountFor(entry.Edition, entry.Version));
-        });
-        await ReloadAsync(refreshCatalog: false);
-        Status = "Версия удалена.";
+            await RunBusyAsync(async ct =>
+            {
+                Status = "Удаление...";
+                ProgressIndeterminate = true;
+                await _services().Library.DeleteStoredAsync(entry, deleteData.Value, ct);
+                // the account is gone: so are its extension links and the shared copies nobody else uses
+                if (deleteData.Value)
+                    _services().Extensions.ForgetAccount(_services().Launch.AccountFor(entry.Edition, entry.Version));
+            });
+        }
+        catch (ProfileNotRemovedException ex)
+        {
+            leftover = ex.Message;
+        }
+        finally
+        {
+            // the folder may be gone even when a later step failed or the prompt was declined: the list shows what is on the disk
+            await ReloadAsync(refreshCatalog: false);
+        }
+
+        Status = "Копия удалена.";
+        if (leftover is not null)
+            Error = leftover;
     }
 
     /// <summary>Where the setup of an entry comes from; null when there is none (not in the download center).</summary>
     private static SetupSource? SetupSourceFor(VersionEntry entry) => entry.Release is { } release ? SetupSource.Download(release) : null;
+
+    private async Task UninstallFromSystemAsync()
+    {
+        Error = null;
+        var entry = SelectedEntry ?? throw new InvalidOperationException("No version selected.");
+        if (!entry.IsInSystem)
+            throw new InvalidOperationException("Эта версия не установлена в системе.");
+        var installer = _services().SystemInstaller;
+        installer.EnsureClosed(entry.Edition);
+        if (ConfirmUninstallFromSystem?.Invoke(entry) != true)
+            return;
+        await RunBusyAsync(ct => installer.UninstallAsync(entry.Edition, entry.Version, new Progress<InstallProgress>(ShowProgress), ct));
+        await ReloadAsync(refreshCatalog: false);
+        Status = $"{entry.Edition.DisplayName} {entry.Version} удалена из системы.";
+    }
 
     private async Task InstallToSystemAsync()
     {
@@ -845,6 +924,7 @@ public sealed class MainViewModel : ObservableObject
             InstallStage.ExtractingPackage => ("Извлечение пакета...", false),
             InstallStage.UnpackingClient => ("Распаковка клиента...", false),
             InstallStage.Copying => ("Копирование файлов", true),
+            InstallStage.UninstallingSystem => ("Удаление из системы... Windows запросит подтверждение, это может занять несколько минут.", false),
             InstallStage.InstallingSystem => ("Установка в систему... Windows запросит подтверждение, это может занять несколько минут.", false),
             _ => ("Завершение...", false),
         };

@@ -31,7 +31,7 @@ public static class AccountNaming
         userName.Length <= MaxLength && LauncherAccount.IsMatch(userName);
 
     private static readonly System.Text.RegularExpressions.Regex LauncherAccount =
-        new(@"^pl[0-9a-f]{4}[EIBC]\d{1,3}x\d{1,3}x\d{1,7}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"^pl[0-9a-f]{4}[EIBCM]\d{1,3}x\d{1,3}x\d{1,7}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     public static string FullName(Edition edition, Version version) => $"Pilot {edition.DisplayName} {version}";
 

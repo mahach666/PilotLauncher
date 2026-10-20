@@ -134,6 +134,31 @@ public sealed class SystemInstaller
         _log.Info($"System install of {edition.DisplayName} {target} finished.");
     }
 
+    /// <summary>
+    /// Removes the installed client of the edition with its own uninstaller, without installing anything instead. The version must be
+    /// the one installed now. Cancelling is possible until the elevated copy starts; after that the removal runs to the end.
+    /// </summary>
+    public async Task UninstallAsync(Edition edition, Version installedVersion, IProgress<InstallProgress>? progress, CancellationToken ct)
+    {
+        EnsureClosed(edition);
+        var installed = _installs.Detect().FirstOrDefault(i => i.Edition.Id == edition.Id);
+        if (installed is null)
+            throw new InvalidOperationException($"{edition.DisplayName} не установлена в системе.");
+        if (installed.Version != installedVersion)
+            throw new InvalidOperationException($"В системе установлена {edition.DisplayName} {installed.Version}, а не {installedVersion}. Обновите список и повторите.");
+
+        ct.ThrowIfCancellationRequested();
+        progress?.Report(new InstallProgress(InstallStage.UninstallingSystem, null));
+        _log.Info($"System uninstall of {edition.DisplayName} {installedVersion}.");
+        await _runElevated(
+            ["uninstall-client", "--edition", edition.Id.ToString(), "--version", installedVersion.ToString()],
+            CancellationToken.None).ConfigureAwait(false);
+
+        if (_installs.Detect().Any(i => i.Edition.Id == edition.Id))
+            throw new InvalidOperationException($"Удаление завершилось без ошибок, но {edition.DisplayName} всё ещё найдена в системе.");
+        _log.Info($"System uninstall of {edition.DisplayName} {installedVersion} finished.");
+    }
+
     private async Task StageSetupAsync(SetupSource source, string staging, string setup, IProgress<InstallProgress>? progress, CancellationToken ct)
     {
         string zip;

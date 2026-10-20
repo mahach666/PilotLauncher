@@ -98,7 +98,7 @@ public sealed class ExtensionsViewModel : ObservableObject
     {
         var entry = _current();
         var services = _services();
-        var target = entry is { IsReady: true } ? services.Extensions.TargetFor(entry) : null;
+        var target = entry is { IsReady: true, Edition.SupportsExtensions: true } ? services.Extensions.TargetFor(entry) : null;
         if (target is null)
         {
             Rows.Clear();
