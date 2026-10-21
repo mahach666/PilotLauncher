@@ -2,7 +2,7 @@
 
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [1.4.1] - 2026-10-22
 
 ### Добавлено
 
