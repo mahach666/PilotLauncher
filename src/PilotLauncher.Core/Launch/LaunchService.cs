@@ -62,14 +62,20 @@ public sealed class LaunchService
     private readonly IWindowApi _windows;
     private readonly string _ownerTag;
     private readonly ILauncherLog _log;
+    private readonly IProfileAccess? _access;
+    private readonly string? _ownerSid;
 
+    /// <param name="access">Gives the main user access to the Pilot data of an isolated profile; null means it is not done.</param>
+    /// <param name="ownerSid">SID of the Windows user running the launcher, the one that gets the access.</param>
     public LaunchService(
         IAccountProvisioner accounts,
         CredentialStore credentials,
         IClientProcessStarter starter,
         IWindowApi windows,
         string ownerTag,
-        ILauncherLog log)
+        ILauncherLog log,
+        IProfileAccess? access = null,
+        string? ownerSid = null)
     {
         _accounts = accounts;
         _credentials = credentials;
@@ -77,6 +83,8 @@ public sealed class LaunchService
         _windows = windows;
         _ownerTag = ownerTag;
         _log = log;
+        _access = access;
+        _ownerSid = ownerSid;
     }
 
     public string AccountFor(Edition edition, Version version) => AccountNaming.UserName(_ownerTag, edition, version);
@@ -95,10 +103,44 @@ public sealed class LaunchService
         var user = AccountFor(version.Edition, version.Version);
         await _accounts.EnsureAsync(user, AccountNaming.FullName(version.Edition, version.Version), ct).ConfigureAwait(false);
         var password = _credentials.Get(user) ?? throw new InvalidOperationException($"No stored password for {user}.");
+        await GrantOwnerAccessOnceAsync(version, user, password, ct).ConfigureAwait(false);
         _log.Info($"Launching {version.Edition.DisplayName} {version.Version} as {user}.");
         var process = _starter.Start(version.ExePath, Path.GetDirectoryName(version.ExePath)!, (user, password));
         return Track(new RunningClient(process, version.Edition, version.Version, isolated: true));
     }
+
+    /// <summary>
+    /// The profile of the account exists from its first sign-in, so the main user gets access to its Pilot data folder at that
+    /// point, once: a note in the folder of the version says it is done. A failure is only logged (the version still starts) and
+    /// is tried again at the next start.
+    /// </summary>
+    private async Task GrantOwnerAccessOnceAsync(StoredVersion version, string user, string password, CancellationToken ct)
+    {
+        if (_access is null || _ownerSid is null)
+            return;
+        var note = Path.Combine(version.Directory, OwnerAccessNote);
+        var expected = $"{user} {_ownerSid}";
+        try
+        {
+            if (File.Exists(note) && File.ReadAllText(note) == expected)
+                return;
+            if (await _access.GrantOwnerAsync(user, password, version.Edition, _ownerSid, ct).ConfigureAwait(false))
+            {
+                File.WriteAllText(note, expected);
+                _log.Info($"The main user may open the Pilot data of {user}.");
+            }
+            else
+            {
+                _log.Warn($"Could not give the main user access to the Pilot data of {user}.");
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException or TimeoutException or UnauthorizedAccessException)
+        {
+            _log.Warn($"Could not give the main user access to the Pilot data of {user}: {ex.Message}");
+        }
+    }
+
+    private const string OwnerAccessNote = "owner-access.txt";
 
     private RunningClient Track(RunningClient client)
     {

@@ -147,7 +147,7 @@ public partial class MainWindow : Window
     {
         var settings = App.Services.Settings;
         var oldShared = settings.SharedFolders.ToList();
-        var dialog = new SettingsWindow(settings.StoreRoot, settings.SetupFolder, settings.Prerelease, settings.CheckUpdates, oldShared) { Owner = this };
+        var dialog = new SettingsWindow(settings.StoreRoot, settings.SetupFolder, settings.Prerelease, settings.CheckUpdates, oldShared, _viewModel.CheckForUpdateNowAsync) { Owner = this };
         if (dialog.ShowDialog() != true)
             return;
         try

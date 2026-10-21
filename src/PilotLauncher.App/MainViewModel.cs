@@ -24,6 +24,11 @@ public static class Format
     };
 }
 
+public enum UpdateCheckState { Newer, UpToDate, NotApplicable, Failed }
+
+/// <param name="Message">What to tell the user, in the words of the window.</param>
+public sealed record UpdateCheckResult(UpdateCheckState State, string Message);
+
 public sealed class VersionItem
 {
     public VersionItem(VersionEntry entry, bool isFavorite)
@@ -122,6 +127,7 @@ public sealed class MainViewModel : ObservableObject
         InstallToSystemCommand = new AsyncCommand(InstallToSystemAsync, () => CanAct && SelectedEntry is { IsInSystem: false } e && SetupSourceFor(e) is not null, ShowError);
         RefreshCommand = new AsyncCommand(RefreshAllAsync, () => !IsBusy, ShowError);
         OpenFolderCommand = new RelayCommand(OpenFolder, () => SelectedEntry?.IsReady == true);
+        OpenDataCommand = new RelayCommand(OpenData, () => SelectedEntry?.IsInStore == true);
         CreateShortcutCommand = new RelayCommand(CreateShortcut, () => SelectedEntry?.IsReady == true);
         AddFromFileCommand = new AsyncCommand(PickAndAddFilesAsync, () => !IsBusy, ShowError);
         DownloadForOfflineCommand = new AsyncCommand(DownloadForOfflineAsync, () => !IsBusy && SelectedEntry?.Release is not null, ShowError);
@@ -161,6 +167,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand AddFromFileCommand { get; }
     public AsyncCommand DownloadForOfflineCommand { get; }
     public RelayCommand OpenFolderCommand { get; }
+    public RelayCommand OpenDataCommand { get; }
     public RelayCommand CreateShortcutCommand { get; }
     public RelayCommand CancelCommand { get; }
     public RelayCommand DismissErrorCommand { get; }
@@ -370,6 +377,7 @@ public sealed class MainViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         _services().Library.Store.CleanTemp(TimeSpan.FromHours(12));
+        _services().Library.Store.CleanLeftovers(TimeSpan.FromHours(12));
         var system = _services().Library.Build([]).FirstOrDefault(e => e.IsInSystem);
         if (system is not null)
             _selectedEdition = system.Edition;
@@ -652,6 +660,7 @@ public sealed class MainViewModel : ObservableObject
         foreach (var command in new[] { LaunchCommand, LaunchIsolatedCommand, CopyToSeparateUserCommand, DeleteCommand, UninstallFromSystemCommand, InstallToSystemCommand, RefreshCommand, AddFromFileCommand, DownloadForOfflineCommand, UpdateCommand })
             command.RaiseCanExecuteChanged();
         OpenFolderCommand.RaiseCanExecuteChanged();
+        OpenDataCommand.RaiseCanExecuteChanged();
         ToggleFavoriteCommand.RaiseCanExecuteChanged();
         Extensions.RaiseCommandStates();
         CreateShortcutCommand.RaiseCanExecuteChanged();
@@ -965,15 +974,30 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public async Task CheckForUpdateAsync()
     {
-        if (!SelfInstaller.IsSingleFile)
-            return;
+        if (SelfInstaller.IsSingleFile)
+            await RunUpdateCheckAsync();
+    }
+
+    /// <summary>The check the user asked for ("Check now" in the settings): the answer is shown, and a hidden banner comes back.</summary>
+    public async Task<UpdateCheckResult> CheckForUpdateNowAsync() =>
+        SelfInstaller.IsSingleFile
+            ? await RunUpdateCheckAsync()
+            : new UpdateCheckResult(UpdateCheckState.NotApplicable, "Это сборка для разработки: она не обновляется сама.");
+
+    private async Task<UpdateCheckResult> RunUpdateCheckAsync()
+    {
         try
         {
-            AvailableUpdate = await _services().Updater.FindNewerAsync(SelfInstaller.CurrentVersion, CancellationToken.None);
+            var newer = await _services().Updater.FindNewerAsync(SelfInstaller.CurrentVersion, CancellationToken.None);
+            AvailableUpdate = newer;
+            return newer is null
+                ? new UpdateCheckResult(UpdateCheckState.UpToDate, $"Установлена последняя версия: {SelfInstaller.CurrentVersion.ToString(3)}.")
+                : new UpdateCheckResult(UpdateCheckState.Newer, $"Доступна версия {newer.Version?.ToString(3) ?? newer.Tag}. В главном окне появилась плашка «Обновить».");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException or System.Text.Json.JsonException or KeyNotFoundException or IOException)
         {
             _services().Log.Error("Update check failed", ex);
+            return new UpdateCheckResult(UpdateCheckState.Failed, $"Не удалось проверить: {ex.Message}");
         }
     }
 
@@ -1024,6 +1048,41 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!string.IsNullOrEmpty(FolderText))
             Process.Start(new ProcessStartInfo("explorer.exe", $"\"{FolderText}\"") { UseShellExecute = true });
+    }
+
+    /// <summary>
+    /// Opens the settings and logs of Pilot (<c>AppData\Roaming\ASCON\&lt;product&gt;</c>) of the isolated profile of the selected copy.
+    /// Pilot's own "open log folder" button cannot do it from there: the shell refuses to open any folder for a program that runs
+    /// under another Windows user. The launcher opens it in the main user's Explorer, to which the access is given at the first start.
+    /// </summary>
+    private void OpenData()
+    {
+        var entry = SelectedEntry ?? throw new InvalidOperationException("No version selected.");
+        var services = _services();
+        var profile = services.Profiles.Find(services.Launch.AccountFor(entry.Edition, entry.Version));
+        if (profile is null)
+        {
+            Status = "Эта копия ещё не запускалась в отдельном профиле: данных Pilot пока нет.";
+            return;
+        }
+
+        var folder = ProfileData.RoamingFolder(profile, entry.Edition);
+        try
+        {
+            _ = Directory.GetDirectories(folder);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            Status = "Папки данных Pilot у этой копии ещё нет: запустите её хотя бы раз.";
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Status = "Нет доступа к данным Pilot этой копии. Запустите копию в отдельном профиле: при запуске лаунчер выдаст вам доступ.";
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
     }
 
     private void CreateShortcut()

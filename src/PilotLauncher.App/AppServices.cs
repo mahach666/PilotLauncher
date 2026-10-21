@@ -32,6 +32,7 @@ public sealed class AppServices
     public required SystemInstaller SystemInstaller { get; init; }
     public required PinnedRootTrust RussianRoot { get; init; }
     public required ExtensionService Extensions { get; init; }
+    public required IProfileLocator Profiles { get; init; }
     public required LauncherUpdater Updater { get; init; }
     public required SharedFolderService SharedFolders { get; init; }
 
@@ -59,7 +60,8 @@ public sealed class AppServices
 
         var detector = new SystemInstallDetector(new AsconRegistry());
         var library = new VersionLibrary(store, detector, installer, provisioner, accountName, log);
-        var launch = new LaunchService(provisioner, credentials, new ClientProcessStarter(), new Win32WindowApi(), ownerTag, log);
+        var ownerSid = WindowsIdentity.GetCurrent().User!.Value;
+        var launch = new LaunchService(provisioner, credentials, new ClientProcessStarter(), new Win32WindowApi(), ownerTag, log, new ProfileAccessGranter(), ownerSid);
         var systemInstaller = new SystemInstaller(detector, new ClientProcesses(), catalog, new FileDownloader(http), new DiskSpace(),
             ElevatedRunner.RunAsync, SystemInstaller.SetupRoot(paths.DataDir), log);
         var extensions = new ExtensionService(store, new ExtensionStore(store.ExtensionsDir, log), new GitHubReleaseClient(http, paths.DataDir),
@@ -67,7 +69,7 @@ public sealed class AppServices
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ownerTag, accountName, log);
         var sharedFolders = new SharedFolderService(ownerTag, credentials, paths.DataDir, ElevatedRunner.RunAsync, log);
         var updater = new LauncherUpdater(new GitHubReleaseClient(http, paths.DataDir), new FileDownloader(http), log);
-        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions, Updater = updater, SharedFolders = sharedFolders };
+        return new AppServices { Paths = paths, Settings = settings, Log = log, Catalog = catalog, Notes = notes, BetaCatalog = betaCatalog, BetaNotes = betaNotes, Library = library, Launch = launch, SystemInstaller = systemInstaller, RussianRoot = russianRoot, Extensions = extensions, Updater = updater, SharedFolders = sharedFolders, Profiles = new ProfileLocator() };
     }
 
     private static HttpClient CreateHttpClient(RemoteCertificateValidationCallback certificateValidation)

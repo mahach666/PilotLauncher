@@ -45,6 +45,17 @@ public sealed class ProfileNotRemovedException : Exception
               "Если окон Pilot этой версии нет, Windows, скорее всего, ещё держит профиль открытым; помогает перезагрузка.";
 }
 
+/// <summary>
+/// The copy cannot be deleted because a Pilot of that version is running (or something else holds its files). Nothing was changed:
+/// the version is still in the store and in the list.
+/// </summary>
+public sealed class VersionInUseException : IOException
+{
+    public VersionInUseException(Edition edition, Version version, Exception inner)
+        : base($"{edition.DisplayName} {version} нельзя удалить, пока она запущена. Закройте все окна Pilot этой версии (проверьте и значок в трее) и повторите. " +
+               "Ничего не удалено, версия осталась в списке.", inner) { }
+}
+
 /// <summary>Merges the download center listing, the store and the system installations.</summary>
 public sealed class VersionLibrary
 {
@@ -142,14 +153,40 @@ public sealed class VersionLibrary
     public async Task DeleteStoredAsync(VersionEntry entry, bool deleteAccount, CancellationToken ct)
     {
         var stored = entry.Stored ?? throw new InvalidOperationException("This version is not in the store.");
-        try
+        if (Directory.Exists(stored.Directory))
         {
-            if (Directory.Exists(stored.Directory))
-                Directory.Delete(stored.Directory, recursive: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new IOException($"Could not delete {stored.Directory}. Close the Pilot windows of this version and try again. ({ex.Message})", ex);
+            // A running Pilot of this version blocks the delete, and nothing may be changed then: deleting in place goes file by
+            // file, fails on the first file in use and leaves a broken half without the manifest, which the list no longer shows.
+            // Windows lets a program keep running when its folder is renamed, so the check is made on the files themselves.
+            if (VersionStore.FindFileInUse(stored.Directory) is { } busy)
+            {
+                _log.Warn($"{entry.Edition.DisplayName} {entry.Version} is in use, not deleted: {busy}");
+                throw new VersionInUseException(entry.Edition, entry.Version, new IOException($"{busy} is in use."));
+            }
+
+            // Moved out of the store first, so the version is gone from the list at once and a half-erased folder can never pass
+            // for it; the files are erased from there.
+            var parked = Path.Combine(_store.TrashDir, Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(_store.TrashDir);
+                Directory.Move(stored.Directory, parked);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log.Warn($"{entry.Edition.DisplayName} {entry.Version} cannot be moved out of the store: {ex.Message}");
+                throw new VersionInUseException(entry.Edition, entry.Version, ex);
+            }
+
+            try
+            {
+                Directory.Delete(parked, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // the version is gone from the store already; what a scanner still holds is removed at the next start
+                _log.Warn($"Could not erase {parked} yet, it is removed at the next start: {ex.Message}");
+            }
         }
 
         _log.Info($"Deleted {entry.Edition.DisplayName} {entry.Version} from the store.");

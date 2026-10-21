@@ -6,9 +6,15 @@ namespace PilotLauncher.App;
 
 public partial class SettingsWindow : Window
 {
-    public SettingsWindow(string storeRoot, string? setupFolder, bool prerelease, bool checkUpdates, IEnumerable<string> sharedFolders)
+    private readonly Func<Task<UpdateCheckResult>> _checkNow;
+
+    /// <param name="checkNow">Asks GitHub for a newer launcher right now (the "Check now" button).</param>
+    public SettingsWindow(string storeRoot, string? setupFolder, bool prerelease, bool checkUpdates, IEnumerable<string> sharedFolders,
+        Func<Task<UpdateCheckResult>> checkNow)
     {
         InitializeComponent();
+        _checkNow = checkNow;
+        VersionText.Text = $"Pilot Launcher {SelfInstaller.CurrentVersion.ToString(3)}";
         // the window grows with its content but never beyond the screen: the rest is scrolled
         MaxHeight = SystemParameters.WorkArea.Height * 0.95;
         PathBox.Text = storeRoot;
@@ -24,6 +30,30 @@ public partial class SettingsWindow : Window
 
     /// <summary>The shared folders as the user left the list.</summary>
     public IReadOnlyList<string> SharedFolders => SharedList.Items.Cast<string>().ToList();
+
+    private async void CheckNow_Click(object sender, RoutedEventArgs e)
+    {
+        CheckNowButton.IsEnabled = false;
+        CheckResult.ClearValue(System.Windows.Controls.TextBlock.ForegroundProperty);
+        CheckResult.Text = "Проверяю...";
+        try
+        {
+            var result = await _checkNow();
+            CheckResult.Text = result.Message;
+            if (result.State == UpdateCheckState.Failed)
+                CheckResult.Foreground = System.Windows.Media.Brushes.IndianRed;
+        }
+        catch (Exception ex)
+        {
+            App.Services.Log.Error("Update check failed", ex);
+            CheckResult.Text = $"Не удалось проверить: {ex.Message}";
+            CheckResult.Foreground = System.Windows.Media.Brushes.IndianRed;
+        }
+        finally
+        {
+            CheckNowButton.IsEnabled = true;
+        }
+    }
 
     private void UpdateSharedHint()
     {

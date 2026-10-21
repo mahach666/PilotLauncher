@@ -103,6 +103,93 @@ public sealed class VersionStore
                 Directory.Delete(dir, recursive: true);
         }
     }
+
+    /// <summary>
+    /// The first file of the folder that another program holds: a running Pilot has its exe and libraries open. Asking for write
+    /// access (nothing is written) is what tells it; reading, or renaming the folder, is allowed while a program runs from it.
+    /// Null when nothing is in use.
+    /// </summary>
+    public static string? FindFileInUse(string directory)
+    {
+        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            }
+            catch (IOException ex) when ((ex.HResult & 0xFFFF) is 32 or 33) // sharing violation, lock violation
+            {
+                return file;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // a read-only file or no right to write: nothing can be said about it, it is not counted
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Where a deleted version waits for its files to be removed (see <see cref="CleanLeftovers"/>).</summary>
+    public string TrashDir => Path.Combine(Root, ".trash");
+
+    /// <summary>
+    /// Removes what deleting and installing leave behind when they are interrupted: versions that were moved out of the store but
+    /// not erased yet, version folders without a manifest (a version folder is only ever put in place complete, so one without
+    /// a manifest is the rest of a delete that stopped half way), and staging folders of installs older than
+    /// <paramref name="stagingOlderThan"/>. A folder that is still in use is left for the next time.
+    /// </summary>
+    public void CleanLeftovers(TimeSpan stagingOlderThan)
+    {
+        if (Directory.Exists(TrashDir))
+        {
+            foreach (var dir in Directory.EnumerateDirectories(TrashDir))
+                TryDelete(dir);
+        }
+
+        if (!Directory.Exists(Root))
+            return;
+        foreach (var edition in Editions.All)
+        {
+            var editionDir = Path.Combine(Root, edition.FolderName);
+            if (!Directory.Exists(editionDir))
+                continue;
+            foreach (var dir in Directory.EnumerateDirectories(editionDir))
+            {
+                var name = Path.GetFileName(dir);
+                var broken = Version.TryParse(name, out _) && !File.Exists(Path.Combine(dir, VersionManifest.FileName));
+                var staging = name.EndsWith(".partial", StringComparison.OrdinalIgnoreCase)
+                              && DateTime.UtcNow - Directory.GetLastWriteTimeUtc(dir) > stagingOlderThan;
+                if (broken || staging)
+                    TryDelete(dir);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Makes room for installing a version: a complete one in the way is an error, the broken rest of an earlier delete is removed.
+    /// </summary>
+    public void EnsureAbsent(Edition edition, Version version)
+    {
+        var dir = VersionDir(edition, version);
+        if (!Directory.Exists(dir))
+            return;
+        if (File.Exists(ManifestPath(edition, version)))
+            throw new InvalidOperationException($"{edition.DisplayName} {version} is already in the store.");
+        Directory.Delete(dir, recursive: true);
+    }
+
+    private static void TryDelete(string dir)
+    {
+        try
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // still in use or locked for a moment (a scanner, a client of that version): it is tried again at the next start
+        }
+    }
 }
 
 public sealed record StoredVersion(Edition Edition, Version Version, VersionManifest Manifest, string Directory)

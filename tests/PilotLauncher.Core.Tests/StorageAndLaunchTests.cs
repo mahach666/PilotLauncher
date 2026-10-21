@@ -53,6 +53,21 @@ public class StorageAndLaunchTests
         }
     }
 
+    private sealed class FakeAccess : IProfileAccess
+    {
+        public List<(string Account, string Password, EditionId Edition, string Sid)> Calls { get; } = [];
+        public bool Result { get; set; } = true;
+        public Exception? Throws { get; set; }
+
+        public Task<bool> GrantOwnerAsync(string account, string password, Edition edition, string ownerSid, CancellationToken ct)
+        {
+            Calls.Add((account, password, edition.Id, ownerSid));
+            return Throws is null ? Task.FromResult(Result) : Task.FromException<bool>(Throws);
+        }
+    }
+
+    private const string OwnerSid = "S-1-5-21-244962767-1130647507-1218246496-1003";
+
     private sealed class FakeStarter : IClientProcessStarter
     {
         public List<(string Exe, string Dir, string? User, string? Password)> Started { get; } = [];
@@ -229,6 +244,144 @@ public class StorageAndLaunchTests
         client.Process.WaitForExit();
     }
 
+    private static (LaunchService Service, StoredVersion Stored, FakeAccess Access, FakeStarter Starter, string User) AccessFixture(string dir)
+    {
+        var store = new VersionStore(Path.Combine(dir, "store"));
+        var stored = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+        var credentials = new CredentialStore(Path.Combine(dir, "credentials.json"), new DpapiProtector());
+        var starter = new FakeStarter();
+        var access = new FakeAccess();
+        var service = new LaunchService(new FakeProvisioner(), credentials, starter, new FakeWindows(), "abcd", NullLog.Instance, access, OwnerSid);
+        var user = service.AccountFor(stored.Edition, stored.Version);
+        credentials.GetOrCreate(user);
+        return (service, stored, access, starter, user);
+    }
+
+    [TestMethod]
+    public async Task TheFirstIsolatedStartGivesTheMainUserAccessToThePilotDataOnceAndLeavesANote()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var (service, stored, access, starter, user) = AccessFixture(dir);
+
+            (await service.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+            (await service.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+
+            var call = access.Calls.Single();
+            Assert.AreEqual(user, call.Account);
+            Assert.AreEqual(EditionId.IceEnterprise, call.Edition);
+            Assert.AreEqual(OwnerSid, call.Sid);
+            Assert.AreEqual(2, starter.Started.Count, "the version started both times");
+            Assert.AreEqual($"{user} {OwnerSid}", File.ReadAllText(Path.Combine(stored.Directory, "owner-access.txt")));
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task AFailedGrantNeverStopsTheStartAndIsTriedAgainNextTime()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var (service, stored, access, starter, _) = AccessFixture(dir);
+
+            access.Result = false;
+            (await service.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+            access.Throws = new System.ComponentModel.Win32Exception(1326, "logon failure");
+            (await service.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+            access.Throws = new TimeoutException("too slow");
+            (await service.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+
+            Assert.AreEqual(3, starter.Started.Count, "every start went ahead");
+            Assert.AreEqual(3, access.Calls.Count, "and every start tried again, there is no note yet");
+            Assert.IsFalse(File.Exists(Path.Combine(stored.Directory, "owner-access.txt")));
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task ANoteMadeForAnotherUserDoesNotCount()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var (service, stored, access, _, user) = AccessFixture(dir);
+            File.WriteAllText(Path.Combine(stored.Directory, "owner-access.txt"), $"{user} S-1-5-21-1-2-3-9999");
+
+            (await service.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+
+            Assert.AreEqual(1, access.Calls.Count);
+            Assert.AreEqual($"{user} {OwnerSid}", File.ReadAllText(Path.Combine(stored.Directory, "owner-access.txt")));
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task NothingIsGrantedWhenNoGrantingIsConfiguredOrForTheSystemInstallation()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var (service, stored, access, _, _) = AccessFixture(dir);
+            var system = new SystemInstall(stored.Edition, stored.Version, stored.AppDir, stored.ExePath);
+
+            service.LaunchSystem(system).Process.WaitForExit();
+            Assert.AreEqual(0, access.Calls.Count, "the system installation runs under the main user: nothing to grant");
+
+            // a launcher built without the granting (as before) just starts the version
+            var credentials = new CredentialStore(Path.Combine(dir, "plain.json"), new DpapiProtector());
+            var starter = new FakeStarter();
+            var plain = NewLaunchService(new FakeProvisioner(), starter, credentials);
+            credentials.GetOrCreate(plain.AccountFor(stored.Edition, stored.Version));
+            (await plain.LaunchIsolatedAsync(stored, CancellationToken.None)).Process.WaitForExit();
+            Assert.AreEqual(1, starter.Started.Count);
+            Assert.IsFalse(File.Exists(Path.Combine(stored.Directory, "owner-access.txt")));
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public void TheHelperCommandCreatesTheFolderAndGrantsOnlyTheGivenUserInTheAccountOwnProfile()
+    {
+        var edition = Editions.Get(EditionId.IceEnterprise);
+
+        var arguments = ProfileAccessGranter.BuildArguments(edition, OwnerSid);
+
+        Assert.AreEqual(
+            "/d /s /c \"md \"%APPDATA%\\ASCON\\Pilot-ICE Enterprise\" 2>nul & icacls \"%APPDATA%\\ASCON\\Pilot-ICE Enterprise\" /grant \"*" + OwnerSid + ":(OI)(CI)M\" >nul\"",
+            arguments);
+        Assert.AreEqual(@"C:\Users\x\AppData\Roaming\ASCON\Pilot-myAdmin", ProfileData.RoamingFolder(@"C:\Users\x", Editions.Get(EditionId.MyAdmin)));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("HP")]
+    [DataRow("S-1-5-21-1-2-3-1003 & calc")]
+    [DataRow("S-1-5-21-1-2-3-1003\" /grant *S-1-1-0:F")]
+    public void TheHelperCommandRefusesAnythingThatIsNotASid(string sid) =>
+        Assert.ThrowsExactly<ArgumentException>(() => ProfileAccessGranter.BuildArguments(Editions.Get(EditionId.Bim), sid));
+
+    [TestMethod]
+    public void TheHelperCommandRefusesAFolderNameWithShellCharacters()
+    {
+        var odd = Editions.Get(EditionId.Bim) with { RegistryName = "Pilot-BIM & del x" };
+
+        Assert.ThrowsExactly<ArgumentException>(() => ProfileAccessGranter.BuildArguments(odd, OwnerSid));
+    }
+
     [TestMethod]
     public async Task LaunchingAStoredVersionPreparesItsAccountAndUsesItsPassword()
     {
@@ -319,6 +472,157 @@ public class StorageAndLaunchTests
             var offline = entries.Single(e => e.Version == new Version(25, 12, 0, 57162));
             Assert.IsTrue(!offline.IsReady && !offline.CanDownload && offline.CanInstallFromFile);
             Assert.AreEqual(setups[1], offline.Setup);
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task ARunningRealProgramOfTheCopyStopsTheDeleteWithNothingChangedAndAfterItEndsTheDeleteWorks()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            var a = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            // a real program started from the folder of the version, as Pilot is
+            File.Copy(Path.Combine(Environment.SystemDirectory, "ping.exe"), a.ExePath, overwrite: true);
+            var library = NewLibrary(store, new FakeRegistry(), new FakeProvisioner());
+            var entry = library.Build([]).Single();
+            using var running = Process.Start(new ProcessStartInfo(a.ExePath, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+            try
+            {
+                await Assert.ThrowsExactlyAsync<VersionInUseException>(() => library.DeleteStoredAsync(entry, deleteAccount: false, CancellationToken.None));
+
+                Assert.IsTrue(File.Exists(Path.Combine(a.Directory, VersionManifest.FileName)), "the manifest is still there");
+                Assert.IsNotNull(store.Find(a.Edition, a.Version), "the version is still in the list");
+                Assert.AreEqual(0, Directory.Exists(store.TrashDir) ? Directory.GetDirectories(store.TrashDir).Length : 0);
+            }
+            finally
+            {
+                running.Kill(entireProcessTree: true);
+                running.WaitForExit();
+            }
+
+            await library.DeleteStoredAsync(entry, deleteAccount: false, CancellationToken.None);
+
+            Assert.IsFalse(Directory.Exists(a.Directory));
+            Assert.IsNull(store.Find(a.Edition, a.Version));
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public void OnlyAFileThatAnotherProgramHoldsCountsAsInUse()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var sub = Path.Combine(dir, "app", "sub");
+            Directory.CreateDirectory(sub);
+            var free = Path.Combine(dir, "app", "free.dll");
+            var readOnly = Path.Combine(sub, "ro.dll");
+            var held = Path.Combine(sub, "held.dll");
+            File.WriteAllText(free, "x");
+            File.WriteAllText(readOnly, "x");
+            File.SetAttributes(readOnly, FileAttributes.ReadOnly);
+            File.WriteAllText(held, "x");
+
+            Assert.IsNull(VersionStore.FindFileInUse(dir), "files nobody holds, a read-only one included");
+
+            using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.Read)) // somebody reads it, not writes
+                Assert.AreEqual(held, VersionStore.FindFileInUse(dir), "a file held in a way that forbids writing");
+
+            File.SetAttributes(readOnly, FileAttributes.Normal);
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public async Task ADeleteLeavesNothingInTheTrashAndTheVersionCanBeInstalledAgain()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            var a = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            var library = NewLibrary(store, new FakeRegistry(), new FakeProvisioner());
+
+            await library.DeleteStoredAsync(library.Build([]).Single(), deleteAccount: false, CancellationToken.None);
+
+            Assert.IsFalse(Directory.Exists(a.Directory));
+            Assert.AreEqual(0, Directory.GetDirectories(store.TrashDir).Length);
+            store.EnsureAbsent(a.Edition, a.Version); // nothing in the way
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public void LeftoversOfInterruptedDeletesAndInstallsAreCleanedButCompleteVersionsStay()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            var whole = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            var broken = store.VersionDir(Editions.Get(EditionId.IceEnterprise), new Version(26, 13, 0, 62219)); // what a half delete leaves: no manifest
+            Directory.CreateDirectory(Path.Combine(broken, "app"));
+            File.WriteAllText(Path.Combine(broken, "app", "x.dll"), "x");
+            var parked = Path.Combine(store.TrashDir, "abc");
+            Directory.CreateDirectory(parked);
+            File.WriteAllText(Path.Combine(parked, "y.dll"), "y");
+            var oldStaging = store.VersionDir(Editions.Get(EditionId.IceEnterprise), new Version(26, 14, 0, 1)) + ".partial";
+            var newStaging = store.VersionDir(Editions.Get(EditionId.IceEnterprise), new Version(26, 15, 0, 1)) + ".partial";
+            Directory.CreateDirectory(oldStaging);
+            Directory.CreateDirectory(newStaging);
+            Directory.SetLastWriteTimeUtc(oldStaging, DateTime.UtcNow.AddDays(-2));
+
+            store.CleanLeftovers(TimeSpan.FromHours(12));
+
+            Assert.IsFalse(Directory.Exists(broken), "the broken half of a delete");
+            Assert.IsFalse(Directory.Exists(parked), "the parked version");
+            Assert.IsFalse(Directory.Exists(oldStaging), "an old staging folder");
+            Assert.IsTrue(Directory.Exists(newStaging), "an install may be running right now");
+            Assert.IsNotNull(store.Find(whole.Edition, whole.Version), "the complete version is untouched");
+        }
+        finally
+        {
+            TestSupport.DeleteQuietly(dir);
+        }
+    }
+
+    [TestMethod]
+    public void AVersionIsNotInstalledOverACompleteOneButTheBrokenRestOfADeleteIsRemoved()
+    {
+        var dir = TestSupport.NewTempDir();
+        try
+        {
+            var store = new VersionStore(Path.Combine(dir, "store"));
+            var whole = Store(store, EditionId.IceEnterprise, "26.9.0.61368");
+            var edition = Editions.Get(EditionId.IceEnterprise);
+            var brokenVersion = new Version(26, 13, 0, 62219);
+            var broken = store.VersionDir(edition, brokenVersion);
+            Directory.CreateDirectory(Path.Combine(broken, "app"));
+            File.WriteAllText(Path.Combine(broken, "app", "x.dll"), "x");
+
+            var ex = Assert.ThrowsExactly<InvalidOperationException>(() => store.EnsureAbsent(whole.Edition, whole.Version));
+            StringAssert.Contains(ex.Message, "already in the store");
+            Assert.IsTrue(Directory.Exists(whole.Directory), "a complete version is never removed by this");
+
+            store.EnsureAbsent(edition, brokenVersion);
+            Assert.IsFalse(Directory.Exists(broken));
+            store.EnsureAbsent(edition, new Version(1, 0, 0, 0)); // nothing there: fine
         }
         finally
         {
@@ -441,10 +745,15 @@ public class StorageAndLaunchTests
             var entry = library.Build([]).Single();
 
             using var locked = new FileStream(a.ExePath, FileMode.Open, FileAccess.Read, FileShare.None); // like a running exe
-            var ex = await Assert.ThrowsExactlyAsync<IOException>(() => library.DeleteStoredAsync(entry, deleteAccount: true, CancellationToken.None));
+            var ex = await Assert.ThrowsExactlyAsync<VersionInUseException>(() => library.DeleteStoredAsync(entry, deleteAccount: true, CancellationToken.None));
 
-            StringAssert.Contains(ex.Message, "Close the Pilot windows");
+            StringAssert.Contains(ex.Message, "нельзя удалить, пока она запущена");
+            StringAssert.Contains(ex.Message, "Ничего не удалено");
             Assert.AreEqual(0, provisioner.Calls.Count);
+            // nothing was touched: the version is whole and still listed
+            Assert.IsTrue(File.Exists(Path.Combine(a.Directory, VersionManifest.FileName)));
+            Assert.IsTrue(File.Exists(a.ExePath));
+            Assert.IsNotNull(store.Find(a.Edition, a.Version));
         }
         finally
         {

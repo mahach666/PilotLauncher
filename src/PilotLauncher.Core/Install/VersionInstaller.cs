@@ -45,8 +45,7 @@ public sealed class VersionInstaller
     public async Task InstallAsync(ReleaseEntry entry, IProgress<InstallProgress>? progress, CancellationToken ct)
     {
         var finalDir = _store.VersionDir(entry.Edition, entry.Version);
-        if (Directory.Exists(finalDir))
-            throw new InvalidOperationException($"{entry.Edition.DisplayName} {entry.Version} is already in the store.");
+        _store.EnsureAbsent(entry.Edition, entry.Version);
 
         progress?.Report(new InstallProgress(InstallStage.Preparing, null));
         Directory.CreateDirectory(_store.Root);
@@ -99,8 +98,7 @@ public sealed class VersionInstaller
         Task.Run(() =>
         {
             var finalDir = _store.VersionDir(edition, version);
-            if (Directory.Exists(finalDir))
-                throw new InvalidOperationException($"{edition.DisplayName} {version} is already in the store.");
+            _store.EnsureAbsent(edition, version);
 
             progress?.Report(new InstallProgress(InstallStage.Preparing, null));
             Directory.CreateDirectory(_store.Root);
@@ -136,8 +134,7 @@ public sealed class VersionInstaller
         Task.Run(() =>
         {
             var finalDir = _store.VersionDir(system.Edition, system.Version);
-            if (Directory.Exists(finalDir))
-                throw new InvalidOperationException($"{system.Edition.DisplayName} {system.Version} is already in the store.");
+            _store.EnsureAbsent(system.Edition, system.Version);
 
             progress?.Report(new InstallProgress(InstallStage.Preparing, null));
             Directory.CreateDirectory(_store.Root);
