@@ -34,14 +34,14 @@ public static class FolderAcl
             throw new AdminOperationException($"{directory}: путь проходит через ссылку, на самом деле это {real}; отказ.");
         if (check?.Invoke(real) is { } problem)
             throw new AdminOperationException($"{real}: {problem}");
-        NativeFolder.ChangeAccess(handle, security => security.AddAccessRule(Rule(who)));
+        NativeFolder.ChangeAccess(handle, who, grant: true);
     }
 
     /// <summary>Takes back what <see cref="Grant"/> gave. It only removes entries of <paramref name="who"/>, so a link is harmless here.</summary>
     public static void Revoke(string directory, SecurityIdentifier who)
     {
         using var handle = NativeFolder.Open(directory, forChange: true);
-        NativeFolder.ChangeAccess(handle, security => security.RemoveAccessRuleAll(Rule(who)));
+        NativeFolder.ChangeAccess(handle, who, grant: false);
     }
 
     public static bool Has(string directory, SecurityIdentifier who) =>
@@ -49,8 +49,6 @@ public static class FolderAcl
             .OfType<FileSystemAccessRule>()
             .Any(r => r.AccessControlType == AccessControlType.Allow && r.IdentityReference.Equals(who) && r.FileSystemRights.HasFlag(FileSystemRights.Modify));
 
-    private static FileSystemAccessRule Rule(SecurityIdentifier who) =>
-        new(who, FileSystemRights.Modify, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow);
 }
 
 /// <summary>

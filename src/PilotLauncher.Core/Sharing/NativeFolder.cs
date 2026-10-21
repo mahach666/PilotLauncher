@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -24,6 +23,11 @@ internal static class NativeFolder
     private const uint ProtectedDacl = 0x80000000;
     private const uint UnprotectedDacl = 0x20000000;
     private const int SeFileObject = 1;
+    private const ushort SeDaclProtected = 0x1000;
+    private const uint ModifyMask = 0x1301BF; // FileSystemRights.Modify with Synchronize
+    private const uint GrantAccess = 1;
+    private const uint RevokeAccess = 4; // removes the explicit entries of the trustee
+    private const uint SubContainersAndObjectsInherit = 3;
 
     /// <param name="forChange">Also asks for the right to change the access list.</param>
     public static SafeFileHandle Open(string path, bool forChange)
@@ -61,40 +65,73 @@ internal static class NativeFolder
     }
 
     /// <summary>
-    /// Changes the access list of the opened folder and lets Windows pass the change on to what is inside it. Whether the list
-    /// blocks inheritance from the parent stays as it was.
+    /// Gives <paramref name="who"/> change rights (inherited by everything inside), or takes back its explicit entries. The list is
+    /// edited where the system keeps it (<c>SetEntriesInAcl</c>), the way the documentation prescribes: the entries inherited from the
+    /// parent keep their flags, and nothing is copied, lost or reordered. Whether the list blocks inheritance from the parent
+    /// stays as it was, and Windows passes the change on to what is already inside the folder.
     /// </summary>
-    public static void ChangeAccess(SafeFileHandle handle, Action<DirectorySecurity> change)
+    public static void ChangeAccess(SafeFileHandle handle, SecurityIdentifier who, bool grant)
     {
-        var current = ReadDacl(handle);
-        var security = new DirectorySecurity();
-        security.SetSecurityDescriptorBinaryForm(current, AccessControlSections.Access);
-        var wasProtected = security.AreAccessRulesProtected;
-        change(security);
-
-        var descriptor = security.GetSecurityDescriptorBinaryForm();
-        var pinned = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+        var rc = GetSecurityInfo(handle, SeFileObject, DaclSecurityInformation, out _, out _, out var oldDacl, out _, out var descriptor);
+        if (rc != 0)
+            throw new Win32Exception((int)rc, "Не удалось прочитать права папки.");
         try
         {
-            if (!GetSecurityDescriptorDacl(pinned.AddrOfPinnedObject(), out var present, out var dacl, out _) || !present)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось подготовить новый список прав.");
-            var rc = SetSecurityInfo(handle, SeFileObject, DaclSecurityInformation | (wasProtected ? ProtectedDacl : UnprotectedDacl), IntPtr.Zero, IntPtr.Zero, dacl, IntPtr.Zero);
-            if (rc != 0)
-                throw new Win32Exception((int)rc, "Не удалось изменить права папки.");
+            var wasProtected = GetSecurityDescriptorControl(descriptor, out var control, out _) && (control & SeDaclProtected) != 0;
+            var sid = new byte[who.BinaryLength];
+            who.GetBinaryForm(sid, 0);
+            var pinned = GCHandle.Alloc(sid, GCHandleType.Pinned);
+            try
+            {
+                var entry = new ExplicitAccess
+                {
+                    Permissions = grant ? ModifyMask : 0,
+                    Mode = grant ? GrantAccess : RevokeAccess,
+                    Inheritance = SubContainersAndObjectsInherit,
+                    Trustee = new Trustee { Form = 0 /* the name field is a SID */, Type = 0 /* unknown kind */, Name = pinned.AddrOfPinnedObject() },
+                };
+                rc = SetEntriesInAclW(1, ref entry, oldDacl, out var newDacl);
+                if (rc != 0)
+                    throw new Win32Exception((int)rc, "Не удалось подготовить новый список прав.");
+                try
+                {
+                    rc = SetSecurityInfo(handle, SeFileObject, DaclSecurityInformation | (wasProtected ? ProtectedDacl : UnprotectedDacl), IntPtr.Zero, IntPtr.Zero, newDacl, IntPtr.Zero);
+                    if (rc != 0)
+                        throw new Win32Exception((int)rc, "Не удалось изменить права папки.");
+                }
+                finally
+                {
+                    LocalFree(newDacl);
+                }
+            }
+            finally
+            {
+                pinned.Free();
+            }
         }
         finally
         {
-            pinned.Free();
+            LocalFree(descriptor);
         }
     }
 
-    private static byte[] ReadDacl(SafeFileHandle handle)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Trustee
     {
-        GetKernelObjectSecurity(handle, DaclSecurityInformation, null, 0, out var needed);
-        var buffer = new byte[needed];
-        if (!GetKernelObjectSecurity(handle, DaclSecurityInformation, buffer, needed, out _))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось прочитать права папки.");
-        return buffer;
+        public IntPtr MultipleTrustee;
+        public int MultipleTrusteeOperation;
+        public int Form;
+        public int Type;
+        public IntPtr Name;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ExplicitAccess
+    {
+        public uint Permissions;
+        public uint Mode;
+        public uint Inheritance;
+        public Trustee Trustee;
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -103,13 +140,18 @@ internal static class NativeFolder
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file, StringBuilder path, uint size, uint flags);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetKernelObjectSecurity(SafeFileHandle handle, uint information, byte[]? descriptor, uint length, out uint needed);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr memory);
+
+    [DllImport("advapi32.dll")]
+    private static extern uint GetSecurityInfo(SafeFileHandle handle, int objectType, uint information, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+
+    [DllImport("advapi32.dll")]
+    private static extern uint SetEntriesInAclW(uint count, ref ExplicitAccess entries, IntPtr oldAcl, out IntPtr newAcl);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetSecurityDescriptorDacl(IntPtr descriptor, [MarshalAs(UnmanagedType.Bool)] out bool present, out IntPtr dacl, [MarshalAs(UnmanagedType.Bool)] out bool defaulted);
+    private static extern bool GetSecurityDescriptorControl(IntPtr descriptor, out ushort control, out uint revision);
 
     [DllImport("advapi32.dll")]
     private static extern uint SetSecurityInfo(SafeFileHandle handle, int objectType, uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);

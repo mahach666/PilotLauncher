@@ -456,6 +456,43 @@ public class SharedFolderTests
         Assert.AreEqual(before, new DirectoryInfo(folder).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)).Count, "the rights of the owner and of the others are as they were");
     }
 
+    /// <summary>A parent with several kinds of inheritable entries, as the temporary folders of a build machine have.</summary>
+    private static string FolderWithRichInheritedRights(Fixture fx)
+    {
+        var parent = fx.Folder("Parent");
+        var parentInfo = new DirectoryInfo(parent);
+        var security = parentInfo.GetAccessControl();
+        const System.Security.AccessControl.InheritanceFlags both = System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit;
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null), System.Security.AccessControl.FileSystemRights.ReadAndExecute, both,
+            System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.CreatorOwnerSid, null), System.Security.AccessControl.FileSystemRights.FullControl, both,
+            System.Security.AccessControl.PropagationFlags.InheritOnly, System.Security.AccessControl.AccessControlType.Allow));
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null), System.Security.AccessControl.FileSystemRights.Write,
+            System.Security.AccessControl.InheritanceFlags.ContainerInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+        parentInfo.SetAccessControl(security);
+        var child = Path.Combine(parent, "Exchange");
+        Directory.CreateDirectory(child);
+        return child;
+    }
+
+    [TestMethod]
+    public void GrantingAndRevokingLeavesEveryRightInheritedFromTheParentExactlyAsItWas()
+    {
+        using var fx = new Fixture();
+        var folder = FolderWithRichInheritedRights(fx);
+        string Rules() => new DirectoryInfo(folder).GetAccessControl().GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.Access);
+        var before = Rules();
+
+        FolderAcl.Grant(folder, GroupSid);
+        FolderAcl.Grant(folder, GroupSid);
+        FolderAcl.Revoke(folder, GroupSid);
+
+        Assert.AreEqual(before, Rules(), "inherited entries are neither copied, nor lost, nor reordered");
+    }
+
     [TestMethod]
     public void AccountsCreatedByTheAdminCommandJoinTheGroup()
     {
